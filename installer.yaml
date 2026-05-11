@@ -1,0 +1,12 @@
+- Version: 1.0.1
+  PackageUrl: https://github.com/minuspiral/playnite-with-erogamescape/releases/download/v1.0.1/ErogameScapeMetadata.pext
+  RequiredApiVersion: 6.11.0
+  ReleaseDate: 2026-05-11
+  Changelog:
+    - 批評空間リニューアル後にpg_escape_string()エラーで日本語キーワード検索が失敗する問題を修正
+- Version: 1.0.0
+  PackageUrl: https://github.com/minuspiral/playnite-with-erogamescape/releases/download/v1.0.0/ErogameScapeMetadata.pext
+  RequiredApiVersion: 6.11.0
+  ReleaseDate: 2026-02-26
+  Changelog:
+    - 初回リリース

@@ -44,15 +44,16 @@ namespace ErogameScapeMetadata.Services
         public async Task<List<ErogameScapeGameInfo>> SearchGamesAsync(
             string keyword, CancellationToken ct = default)
         {
+            // LIKEワイルドカードのエスケープ。'はhexエンコードでバイト0x27として復元されるためエスケープ不要。
             var escapedKeyword = keyword
-                .Replace("'", "''")
                 .Replace("!", "!!")
                 .Replace("%", "!%")
                 .Replace("_", "!_");
+            var keywordLiteral = BuildSqlJapaneseLiteral(escapedKeyword);
             var sql = $"SELECT g.id, g.gamename, g.furigana, g.sellday, g.median, g.count2, " +
                       $"b.brandname " +
                       $"FROM gamelist g LEFT JOIN brandlist b ON g.brandname = b.id " +
-                      $"WHERE g.gamename LIKE '%{escapedKeyword}%' ESCAPE '!' " +
+                      $"WHERE g.gamename LIKE '%' || {keywordLiteral} || '%' ESCAPE '!' " +
                       $"ORDER BY g.count2 DESC LIMIT 30";
 
             var rows = await ExecuteSqlAsync(sql, ct);
@@ -595,6 +596,18 @@ namespace ErogameScapeMetadata.Services
                 .Replace("\n", "\\n")
                 .Replace("\r", "\\r")
                 .Replace("\t", "\\t") + "\"";
+        }
+
+        /// <summary>
+        /// 非ASCII文字を含む文字列を、SQL中で安全に構築するためのリテラル式を返す。
+        /// 2026-05のErogameScapeリニューアル後、pg_escape_string()が非ASCIIバイトを拒否するため、
+        /// UTF-8バイト列をhexエンコードして convert_from(decode(...)) でサーバ側復元する形に変換する。
+        /// </summary>
+        private static string BuildSqlJapaneseLiteral(string value)
+        {
+            var bytes = System.Text.Encoding.UTF8.GetBytes(value ?? string.Empty);
+            var hex = BitConverter.ToString(bytes).Replace("-", "").ToLowerInvariant();
+            return $"convert_from(decode('{hex}','hex'),'UTF8')";
         }
 
         /// <summary>
