@@ -230,7 +230,9 @@ namespace ErogameScapeMetadata.Services
                     }
                 }
             }
-            catch (Exception ex) when (!(ex is OperationCanceledException))
+            // HttpClientのタイムアウトもTaskCanceledExceptionを投げるため、
+            // 実際にキャンセル要求があった場合のみ伝播させる
+            catch (Exception ex) when (!(ex is OperationCanceledException) || !ct.IsCancellationRequested)
             {
                 _logger.Warn($"DLsite API エラー ({game.DlsiteId}): {ex.Message}");
             }
@@ -244,10 +246,10 @@ namespace ErogameScapeMetadata.Services
 
             try
             {
-                // Getchuでゲーム名を検索
+                // Getchuでゲーム名を検索（キーワードはUTF-8だと0件になるためEUC-JPでエンコード）
                 var searchUrl = "https://www.getchu.com/php/nsearch.phtml"
                     + "?genre=pc_soft&search_type=match&search_keyword="
-                    + Uri.EscapeDataString(game.GameName);
+                    + EscapeEucJp(game.GameName);
 
                 _logger.Info($"Getchu検索: {game.GameName}");
 
@@ -278,7 +280,9 @@ namespace ErogameScapeMetadata.Services
                     }
                 }
             }
-            catch (Exception ex) when (!(ex is OperationCanceledException))
+            // HttpClientのタイムアウトもTaskCanceledExceptionを投げるため、
+            // 実際にキャンセル要求があった場合のみ伝播させる
+            catch (Exception ex) when (!(ex is OperationCanceledException) || !ct.IsCancellationRequested)
             {
                 _logger.Warn($"Getchu検索エラー ({game.GameName}): {ex.Message}");
             }
@@ -527,7 +531,9 @@ namespace ErogameScapeMetadata.Services
                     _logger.Info($"VNDB: あらすじ={!string.IsNullOrEmpty(result.Description)}, カバー={!string.IsNullOrEmpty(result.CoverImageUrl)}, SFWスクリーンショット={result.ScreenshotUrls.Count}件");
                 }
             }
-            catch (Exception ex) when (!(ex is OperationCanceledException))
+            // HttpClientのタイムアウトもTaskCanceledExceptionを投げるため、
+            // 実際にキャンセル要求があった場合のみ伝播させる
+            catch (Exception ex) when (!(ex is OperationCanceledException) || !ct.IsCancellationRequested)
             {
                 _logger.Warn($"VNDBデータ取得エラー: {ex.Message}");
             }
@@ -756,11 +762,32 @@ namespace ErogameScapeMetadata.Services
                     return await response.Content.ReadAsByteArrayAsync();
                 }
             }
-            catch (Exception ex) when (!(ex is OperationCanceledException))
+            // HttpClientのタイムアウトもTaskCanceledExceptionを投げるため、
+            // 実際にキャンセル要求があった場合のみ伝播させる
+            catch (Exception ex) when (!(ex is OperationCanceledException) || !ct.IsCancellationRequested)
             {
                 _logger.Warn($"画像ダウンロードエラー ({url}): {ex.Message}");
                 return null;
             }
+        }
+
+        private static string EscapeEucJp(string value)
+        {
+            var bytes = System.Text.Encoding.GetEncoding("EUC-JP").GetBytes(value);
+            var sb = new System.Text.StringBuilder();
+            foreach (var b in bytes)
+            {
+                if ((b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9')
+                    || b == '-' || b == '_' || b == '.' || b == '~')
+                {
+                    sb.Append((char)b);
+                }
+                else
+                {
+                    sb.AppendFormat("%{0:X2}", b);
+                }
+            }
+            return sb.ToString();
         }
 
         private static string NullIfEmpty(string value)
