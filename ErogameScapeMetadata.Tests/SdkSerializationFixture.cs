@@ -212,6 +212,13 @@ namespace ErogameScapeMetadata.Tests
             return FromJson<T>(ToJson(source));
         }
 
+        public U GetClone<T, U>(T source)
+            where T : class
+            where U : class
+        {
+            return FromJson<U>(ToJson(source));
+        }
+
         public bool AreObjectsEqual(object object1, object object2)
         {
             return ToJson(object1) == ToJson(object2);
