@@ -1,5 +1,13 @@
 AddonId: GalgameMetadata_e6ab0c61-8c40-4e4b-842b-08cd132c09e4
 Packages:
+  - Version: 2.1.0
+    RequiredApiVersion: 6.11.0
+    ReleaseDate: 2026-08-28
+    PackageUrl: https://github.com/jayhormes/playnite-galgame-metadata/releases/download/v2.1.0/GalgameMetadata.pext
+    Changelog:
+      - Settings now have a UI under Add-ons - Extensions instead of hand-edited JSON
+      - Settings are validated on save and Cancel rolls back changes
+      - Changing settings no longer needs a Playnite restart
   - Version: 2.0.0
     RequiredApiVersion: 6.11.0
     ReleaseDate: 2026-08-28

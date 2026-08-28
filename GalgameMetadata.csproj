@@ -6,7 +6,7 @@
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <AssemblyName>GalgameMetadata</AssemblyName>
     <RootNamespace>GalgameMetadata</RootNamespace>
-    <Version>2.0.0</Version>
+    <Version>2.1.0</Version>
     <Authors>minuspiral, jayhormes</Authors>
     <Description>Galgame and visual novel metadata for Playnite (NocoDB, VNDB, ErogameScape, DLsite, DMM)</Description>
   </PropertyGroup>
