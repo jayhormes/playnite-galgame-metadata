@@ -16,6 +16,9 @@ jobs:
       - name: Build
         run: dotnet build ErogameScapeMetadata.csproj -c Release
 
+      - name: Test
+        run: dotnet test ErogameScapeMetadata.Tests/ErogameScapeMetadata.Tests.csproj -c Release
+
       - name: Package pext
         shell: pwsh
         run: |

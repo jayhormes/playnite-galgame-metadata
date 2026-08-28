@@ -2,7 +2,7 @@ using Playnite.SDK;
 using Playnite.SDK.Data;
 using System;
 using System.Collections.Generic;
-using System.Net;
+using System.Globalization;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,6 +11,12 @@ namespace ErogameScapeMetadata.Services
 {
     public class NocoDbClient
     {
+        // 遊戲收藏庫で取得する列。NocoDB の列名は日本語/繁体字そのままがキーになる。
+        internal const string RecordFields =
+            "Id,Name,原名,發售日期,EGS 評分,EGS 票數,vndb 評分,vndb 票數,封面圖,LTAR_開發品牌";
+
+        internal const int MaxLinkedTags = 100;
+
         private readonly HttpClient _http;
         private readonly ILogger _logger;
         private readonly string _baseUrl;
@@ -21,7 +27,10 @@ namespace ErogameScapeMetadata.Services
 
         public string BaseUrl => _baseUrl;
 
-        public bool IsConfigured => !string.IsNullOrWhiteSpace(_baseUrl) && !string.IsNullOrWhiteSpace(_token);
+        public bool IsConfigured =>
+            !string.IsNullOrWhiteSpace(_baseUrl)
+            && !string.IsNullOrWhiteSpace(_token)
+            && !string.IsNullOrWhiteSpace(_gamesTableId);
 
         public NocoDbClient(
             HttpClient http,
@@ -35,7 +44,7 @@ namespace ErogameScapeMetadata.Services
         {
             _http = http;
             _logger = logger;
-            _baseUrl = (baseUrl ?? string.Empty).TrimEnd('/');
+            _baseUrl = (baseUrl ?? string.Empty).Trim().TrimEnd('/');
             _token = (token ?? string.Empty).Trim();
             _gamesTableId = (gamesTableId ?? string.Empty).Trim();
             _genreLinkId = (genreLinkId ?? string.Empty).Trim();
@@ -43,8 +52,8 @@ namespace ErogameScapeMetadata.Services
 
             if (ignoreSslErrors)
             {
-                ServicePointManager.ServerCertificateValidationCallback =
-                    (sender, certificate, chain, sslPolicyErrors) => true;
+                // この host だけ証明書検証を免除する（他 host には影響しない）
+                SslCertificateBypass.AllowHost(_baseUrl);
             }
         }
 
@@ -52,71 +61,41 @@ namespace ErogameScapeMetadata.Services
             string vndbId, int? egsId, string gameName, CancellationToken ct = default)
         {
             if (!IsConfigured)
+            {
+                if (!string.IsNullOrWhiteSpace(_baseUrl) && string.IsNullOrWhiteSpace(_gamesTableId))
+                {
+                    _logger?.Warn("NocoDB: NocoDbGamesTableId が未設定のため照会をスキップ");
+                }
                 return null;
+            }
 
             try
             {
-                // 1. 依序使用 VNDB ID、EGS ID 或遊戲名稱尋找遊戲記錄
+                // 1. vndb URL（完全一致）→ EGS URL（末尾一致）→ Name（完全一致）の順で照合
                 var gameRecord = await FindGameRecordAsync(vndbId, egsId, gameName, ct);
                 if (gameRecord == null || gameRecord.Id == 0)
                 {
-                    _logger.Info($"NocoDB 查無記錄: vndb={vndbId}, egs={egsId}, name={gameName}");
+                    _logger?.Info($"NocoDB 查無記錄: vndb={vndbId}, egs={egsId}, name={gameName}");
                     return null;
                 }
 
-                _logger.Info($"NocoDB 找到遊戲記錄: Id={gameRecord.Id}, Name={gameRecord.Name}");
+                _logger?.Info($"NocoDB 找到遊戲記錄: Id={gameRecord.Id}, Name={gameRecord.Name}");
 
-                // 2. 獲取類型標籤與遊戲屬性標籤
+                // 2. 類型標籤・遊戲屬性のリンクを取得
                 var tags = new List<string>();
-
-                var genreTags = await FetchLinkedTagsAsync(_genreLinkId, gameRecord.Id, ct);
-                foreach (var tag in genreTags)
-                {
-                    if (!string.IsNullOrWhiteSpace(tag) && !tags.Contains(tag))
-                        tags.Add(tag);
-                }
-
-                var attrTags = await FetchLinkedTagsAsync(_attrLinkId, gameRecord.Id, ct);
-                foreach (var tag in attrTags)
-                {
-                    if (!string.IsNullOrWhiteSpace(tag) && !tags.Contains(tag))
-                        tags.Add(tag);
-                }
-
-                // 3. 獲取封面圖片網址
-                string coverUrl = null;
-                if (gameRecord.CoverAttachments != null && gameRecord.CoverAttachments.Count > 0)
-                {
-                    var att = gameRecord.CoverAttachments[0];
-                    var path = !string.IsNullOrEmpty(att.SignedPath) ? att.SignedPath : att.Path;
-                    if (!string.IsNullOrEmpty(path))
-                    {
-                        coverUrl = $"{_baseUrl}/{path.TrimStart('/')}";
-                    }
-                }
-
-                // 4. 品牌與發售日
-                string brandName = null;
-                if (gameRecord.Brands != null && gameRecord.Brands.Count > 0)
-                {
-                    brandName = gameRecord.Brands[0].Name;
-                }
-
-                DateTime? releaseDate = null;
-                if (!string.IsNullOrEmpty(gameRecord.ReleaseDate) &&
-                    DateTime.TryParse(gameRecord.ReleaseDate, out var parsedDate))
-                {
-                    releaseDate = parsedDate;
-                }
+                AppendTags(tags, await FetchLinkedTagsAsync(_genreLinkId, gameRecord.Id, ct));
+                AppendTags(tags, await FetchLinkedTagsAsync(_attrLinkId, gameRecord.Id, ct));
 
                 return new NocoDbGameData
                 {
                     GameId = gameRecord.Id,
                     Name = gameRecord.Name,
                     OriginalName = gameRecord.OriginalName,
-                    BrandName = brandName,
-                    ReleaseDate = releaseDate,
-                    CoverImageUrl = coverUrl,
+                    BrandName = gameRecord.Brands != null && gameRecord.Brands.Count > 0
+                        ? gameRecord.Brands[0].Name
+                        : null,
+                    ReleaseDate = ParseReleaseDate(gameRecord.ReleaseDate),
+                    CoverImageUrl = BuildAttachmentUrl(_baseUrl, gameRecord.CoverAttachments),
                     EgsScore = gameRecord.EgsScore,
                     EgsCount = gameRecord.EgsCount,
                     VndbScore = gameRecord.VndbScore,
@@ -126,7 +105,7 @@ namespace ErogameScapeMetadata.Services
             }
             catch (Exception ex) when (!(ex is OperationCanceledException) || !ct.IsCancellationRequested)
             {
-                _logger.Warn($"NocoDB 查詢失敗: {ex.Message}");
+                _logger?.Warn($"NocoDB 查詢失敗: {ex.Message}");
                 return null;
             }
         }
@@ -144,6 +123,7 @@ namespace ErogameScapeMetadata.Services
             {
                 using (var request = new HttpRequestMessage(HttpMethod.Get, url))
                 {
+                    // token は NocoDB 宛のみ付与（共有 HttpClient の既定ヘッダには入れない）
                     if (IsNocoDbUrl(url))
                     {
                         request.Headers.TryAddWithoutValidation("xc-token", _token);
@@ -152,7 +132,17 @@ namespace ErogameScapeMetadata.Services
                     using (var response = await _http.SendAsync(request, ct))
                     {
                         if (!response.IsSuccessStatusCode)
+                        {
+                            _logger?.Warn($"NocoDB 圖片下載失敗 ({(int)response.StatusCode}): {url}");
                             return null;
+                        }
+
+                        var contentType = response.Content.Headers.ContentType?.MediaType ?? "";
+                        if (!contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+                        {
+                            _logger?.Warn($"NocoDB 圖片下載: 非圖片回應 ({contentType}) {url}");
+                            return null;
+                        }
 
                         return await response.Content.ReadAsByteArrayAsync();
                     }
@@ -160,7 +150,7 @@ namespace ErogameScapeMetadata.Services
             }
             catch (Exception ex) when (!(ex is OperationCanceledException) || !ct.IsCancellationRequested)
             {
-                _logger.Warn($"NocoDB 圖片下載失敗 ({url}): {ex.Message}");
+                _logger?.Warn($"NocoDB 圖片下載失敗 ({url}): {ex.Message}");
                 return null;
             }
         }
@@ -168,29 +158,9 @@ namespace ErogameScapeMetadata.Services
         private async Task<NocoDbRawGameRecord> FindGameRecordAsync(
             string vndbId, int? egsId, string gameName, CancellationToken ct)
         {
-            if (string.IsNullOrWhiteSpace(_gamesTableId))
-                return null;
-
-            var whereConditions = new List<string>();
-
-            if (!string.IsNullOrEmpty(vndbId))
+            foreach (var where in BuildWhereConditions(vndbId, egsId, gameName))
             {
-                whereConditions.Add($"(vndb URL,like,%{vndbId}%)");
-            }
-            if (egsId.HasValue)
-            {
-                whereConditions.Add($"(EGS URL,like,%game={egsId.Value}%)");
-            }
-            if (!string.IsNullOrEmpty(gameName))
-            {
-                whereConditions.Add($"(Name,eq,{EscapeFilterValue(gameName)})");
-            }
-
-            foreach (var where in whereConditions)
-            {
-                var queryParams = $"where={Uri.EscapeDataString(where)}&fields=Id,Name,%E5%8E%9F%E5%90%8D,%E7%99%BC%E5%94%AE%E6%97%A5%E6%9C%9F,EGS%20%E8%A9%95%E5%88%86,EGS%20%E7%A5%A8%E6%95%B8,vndb%20%E8%A9%95%E5%88%86,vndb%20%E7%A5%A8%E6%95%B8,%E5%B0%81%E9%9D%A2%E5%9C%96,LTAR_%E9%96%8B%E7%99%BC%E5%93%81%E7%89%8C&limit=1";
-                var url = $"{_baseUrl}/api/v2/tables/{_gamesTableId}/records?{queryParams}";
-
+                var url = BuildRecordsUrl(_baseUrl, _gamesTableId, where);
                 var response = await GetAsync<NocoDbListResponse<NocoDbRawGameRecord>>(url, ct);
                 if (response?.List != null && response.List.Count > 0)
                 {
@@ -201,28 +171,117 @@ namespace ErogameScapeMetadata.Services
             return null;
         }
 
-        private async Task<List<string>> FetchLinkedTagsAsync(string linkId, int gameRecordId, CancellationToken ct)
+        /// <summary>
+        /// 照合条件を優先順に返す。実 DB（2,332 件）で検証した形式:
+        ///   vndb URL は "https://vndb.org/vN" に統一 → 完全一致が使える
+        ///   EGS URL は http/https/旧パスが混在 → 末尾一致 "%game=N"（末尾 % なし）で誤爆を防ぐ
+        /// </summary>
+        internal static List<string> BuildWhereConditions(string vndbId, int? egsId, string gameName)
+        {
+            var conditions = new List<string>();
+
+            var vndb = SanitizeFilterValue(vndbId);
+            if (!string.IsNullOrEmpty(vndb))
+            {
+                conditions.Add($"(vndb URL,eq,https://vndb.org/{vndb})");
+            }
+
+            if (egsId.HasValue)
+            {
+                // 末尾に % を付けない = 前方一致による誤爆（game=4043 が game=40432 に当たる等）を防ぐ
+                conditions.Add($"(EGS URL,like,%game={egsId.Value})");
+            }
+
+            var name = SanitizeFilterValue(gameName);
+            if (!string.IsNullOrEmpty(name))
+            {
+                conditions.Add($"(Name,eq,{name})");
+            }
+
+            return conditions;
+        }
+
+        internal static string BuildRecordsUrl(string baseUrl, string tableId, string where)
+        {
+            // sort=Id で limit=1 の結果を決定的にする
+            return $"{baseUrl}/api/v2/tables/{tableId}/records"
+                 + $"?where={Uri.EscapeDataString(where)}"
+                 + $"&fields={Uri.EscapeDataString(RecordFields)}"
+                 + "&sort=Id&limit=1";
+        }
+
+        internal static string BuildLinksUrl(string baseUrl, string tableId, string linkId, int recordId)
+        {
+            return $"{baseUrl}/api/v2/tables/{tableId}/links/{linkId}/records/{recordId}"
+                 + $"?fields=Id,Name&limit={MaxLinkedTags}";
+        }
+
+        /// <summary>
+        /// signedPath（署名付き一時 URL）優先、無ければ path（xc-token 必須）。
+        /// </summary>
+        internal static string BuildAttachmentUrl(string baseUrl, List<NocoDbAttachment> attachments)
+        {
+            if (attachments == null || attachments.Count == 0 || string.IsNullOrEmpty(baseUrl))
+                return null;
+
+            var attachment = attachments[0];
+            var path = !string.IsNullOrWhiteSpace(attachment?.SignedPath)
+                ? attachment.SignedPath
+                : attachment?.Path;
+
+            if (string.IsNullOrWhiteSpace(path))
+                return null;
+
+            return $"{baseUrl.TrimEnd('/')}/{path.Trim().TrimStart('/')}";
+        }
+
+        internal static DateTime? ParseReleaseDate(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return null;
+
+            DateTime parsed;
+            return DateTime.TryParse(value, CultureInfo.InvariantCulture,
+                DateTimeStyles.None, out parsed)
+                ? parsed
+                : (DateTime?)null;
+        }
+
+        private async Task<List<string>> FetchLinkedTagsAsync(
+            string linkId, int gameRecordId, CancellationToken ct)
         {
             var tags = new List<string>();
-            if (string.IsNullOrWhiteSpace(linkId) || string.IsNullOrWhiteSpace(_gamesTableId))
+            if (string.IsNullOrWhiteSpace(linkId))
                 return tags;
 
-            var queryParams = "fields=Id,Name&limit=100";
-            var url = $"{_baseUrl}/api/v2/tables/{_gamesTableId}/links/{linkId}/records/{gameRecordId}?{queryParams}";
-
+            var url = BuildLinksUrl(_baseUrl, _gamesTableId, linkId, gameRecordId);
             var response = await GetAsync<NocoDbListResponse<NocoDbTagRecord>>(url, ct);
-            if (response?.List != null)
+            if (response?.List == null)
+                return tags;
+
+            foreach (var item in response.List)
             {
-                foreach (var item in response.List)
+                if (!string.IsNullOrWhiteSpace(item.Name))
                 {
-                    if (!string.IsNullOrWhiteSpace(item.Name))
-                    {
-                        tags.Add(item.Name.Trim());
-                    }
+                    tags.Add(item.Name.Trim());
                 }
             }
 
             return tags;
+        }
+
+        internal static void AppendTags(List<string> target, List<string> source)
+        {
+            if (target == null || source == null)
+                return;
+
+            foreach (var tag in source)
+            {
+                if (!string.IsNullOrWhiteSpace(tag) && !target.Contains(tag))
+                {
+                    target.Add(tag);
+                }
+            }
         }
 
         private async Task<T> GetAsync<T>(string url, CancellationToken ct) where T : class
@@ -234,7 +293,7 @@ namespace ErogameScapeMetadata.Services
                 {
                     if (!response.IsSuccessStatusCode)
                     {
-                        _logger.Warn($"NocoDB API 請求失敗 ({(int)response.StatusCode}): {url}");
+                        _logger?.Warn($"NocoDB API 請求失敗 ({(int)response.StatusCode}): {url}");
                         return null;
                     }
 
@@ -244,9 +303,14 @@ namespace ErogameScapeMetadata.Services
             }
         }
 
-        private static string EscapeFilterValue(string value)
+        /// <summary>
+        /// NocoDB の where 値は括弧・カンマを含んでもそのまま通る（実 DB で検証済み。
+        /// 例:「彼女は高天(そら)に祈らない -quantum girlfriend-」「… into the firmament‐」）。
+        /// 逆に文字を削除・バックスラッシュ escape すると一致しなくなるため、trim のみ行う。
+        /// </summary>
+        internal static string SanitizeFilterValue(string value)
         {
-            return (value ?? "").Replace("(", "").Replace(")", "").Replace(",", "");
+            return (value ?? string.Empty).Trim();
         }
     }
 

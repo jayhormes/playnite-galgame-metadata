@@ -29,7 +29,8 @@ namespace ErogameScapeMetadata.Services
         private readonly EgsStatsClient _egsStats;
         private readonly NocoDbClient _nocoDb;
         private readonly bool _preferNocoDbTags;
-        private readonly bool _fallbackNocoDbScores;
+        private readonly bool _useNocoDbScores;
+        private readonly int _nocoDbMaxTags;
 
         static ErogameScapeApiClient()
         {
@@ -48,9 +49,10 @@ namespace ErogameScapeMetadata.Services
             _nocoDb = new NocoDbClient(HttpClient, logger,
                 config?.NocoDbBaseUrl, config?.NocoDbApiToken,
                 config?.NocoDbGamesTableId, config?.NocoDbGenreLinkId, config?.NocoDbAttrLinkId,
-                config?.NocoDbIgnoreSslErrors ?? true);
+                config?.NocoDbIgnoreSslErrors ?? false);
             _preferNocoDbTags = config?.PreferNocoDbTags ?? true;
-            _fallbackNocoDbScores = config?.FallbackNocoDbScores ?? true;
+            _useNocoDbScores = config?.FallbackNocoDbScores ?? true;
+            _nocoDbMaxTags = config?.NocoDbMaxTags ?? PluginConfig.DefaultNocoDbMaxTags;
         }
 
         public async Task<List<ErogameScapeGameInfo>> SearchGamesAsync(
@@ -100,58 +102,7 @@ namespace ErogameScapeMetadata.Services
             if (_nocoDb.IsConfigured)
             {
                 var nocoData = await _nocoDb.GetGameDataAsync(game.VndbId, game.EgsId, game.GameName, ct);
-                if (nocoData != null)
-                {
-                    // 1. 封面圖優先採用 NocoDB
-                    if (!string.IsNullOrEmpty(nocoData.CoverImageUrl))
-                    {
-                        game.NocoDbCoverImageUrl = nocoData.CoverImageUrl;
-                    }
-
-                    // 2. 標籤優先採用 NocoDB
-                    if (nocoData.Tags != null && nocoData.Tags.Count > 0)
-                    {
-                        if (_preferNocoDbTags)
-                        {
-                            game.Tags = nocoData.Tags;
-                        }
-                        else
-                        {
-                            foreach (var tag in game.Tags)
-                            {
-                                if (!nocoData.Tags.Contains(tag))
-                                    nocoData.Tags.Add(tag);
-                            }
-                            game.Tags = nocoData.Tags;
-                        }
-                    }
-
-                    // 3. EGS 評分優先採用 NocoDB 常態更新的分數
-                    if (nocoData.EgsScore.HasValue && nocoData.EgsScore.Value > 0)
-                    {
-                        game.Median = nocoData.EgsScore.Value;
-                        game.ReviewCount = nocoData.EgsCount;
-                        game.EgsSource = "nocodb";
-                    }
-
-                    // 4. VNDB 評分優先採用 NocoDB
-                    if (nocoData.VndbScore.HasValue && nocoData.VndbScore.Value > 0)
-                    {
-                        game.VndbRating = nocoData.VndbScore;
-                    }
-
-                    // 5. 品牌名稱
-                    if (!string.IsNullOrEmpty(nocoData.BrandName))
-                    {
-                        game.BrandName = nocoData.BrandName;
-                    }
-
-                    // 6. 發售日
-                    if (nocoData.ReleaseDate.HasValue)
-                    {
-                        game.SellDay = nocoData.ReleaseDate.Value;
-                    }
-                }
+                ApplyNocoDbData(game, nocoData);
             }
 
             // EGS スコア（NocoDB にスコアが無い場合のみ Wayback → Tavily を実行）
@@ -187,6 +138,85 @@ namespace ErogameScapeMetadata.Services
             }
 
             return game;
+        }
+
+        /// <summary>
+        /// NocoDB（自建庫）の値を優先適用する。HTTP を伴わない純粋なマージ処理。
+        /// </summary>
+        internal void ApplyNocoDbData(ErogameScapeGameInfo game, NocoDbGameData noco)
+        {
+            if (game == null || noco == null)
+                return;
+
+            // 1. 封面圖：NocoDB を最優先候補にする
+            if (!string.IsNullOrEmpty(noco.CoverImageUrl))
+            {
+                game.NocoDbCoverImageUrl = noco.CoverImageUrl;
+            }
+
+            // 2. 標籤：PreferNocoDbTags = true なら NocoDB のみ、false なら NocoDB を先頭に VNDB を継ぎ足す
+            game.Tags = MergeTags(noco.Tags, game.Tags, _preferNocoDbTags, _nocoDbMaxTags);
+
+            // 3. EGS 分數：FallbackNocoDbScores = false なら NocoDB のキャッシュを使わず Wayback/Tavily を引く
+            if (_useNocoDbScores && noco.EgsScore.HasValue && noco.EgsScore.Value > 0)
+            {
+                game.Median = noco.EgsScore.Value;
+                game.ReviewCount = noco.EgsCount;
+                game.EgsSource = "nocodb";
+                game.EgsSnapshotDate = null;
+            }
+
+            // 4. VNDB 分數も NocoDB 側を優先（同じ 10-100 スケール）
+            if (_useNocoDbScores && noco.VndbScore.HasValue && noco.VndbScore.Value > 0)
+            {
+                game.VndbRating = noco.VndbScore;
+            }
+
+            if (!string.IsNullOrEmpty(noco.BrandName))
+            {
+                game.BrandName = noco.BrandName;
+            }
+
+            if (noco.ReleaseDate.HasValue)
+            {
+                game.SellDay = noco.ReleaseDate.Value;
+            }
+
+            // 原名は検索候補の副題として使う（VNDB 側に別題が無い場合のみ）
+            if (string.IsNullOrEmpty(game.AltName) && !string.IsNullOrWhiteSpace(noco.OriginalName))
+            {
+                game.AltName = noco.OriginalName.Trim();
+            }
+        }
+
+        /// <summary>
+        /// NocoDB タグと既存（VNDB）タグを結合する。重複除去のうえ maxTags 件で打ち切る。
+        /// </summary>
+        internal static List<string> MergeTags(
+            List<string> nocoTags, List<string> existingTags, bool preferNoco, int maxTags)
+        {
+            var noco = nocoTags ?? new List<string>();
+            var existing = existingTags ?? new List<string>();
+
+            if (noco.Count == 0)
+            {
+                return existing;
+            }
+
+            var merged = new List<string>();
+            NocoDbClient.AppendTags(merged, noco);
+
+            if (!preferNoco)
+            {
+                NocoDbClient.AppendTags(merged, existing);
+            }
+
+            if (maxTags > 0 && merged.Count > maxTags)
+            {
+                merged = merged.GetRange(0, maxTags);
+            }
+
+            return merged;
         }
 
         internal void ApplyExtLinks(ErogameScapeGameInfo game, List<VndbRelease> releases)

@@ -28,17 +28,27 @@ A unified Galgame & Visual Novel metadata provider for [Playnite](https://playni
   "NocoDbBaseUrl": "https://nocodb.your-domain.com",
   "NocoDbApiToken": "your_nocodb_token",
   "NocoDbGamesTableId": "your_games_table_id",
-  "NocoDbGenreLinkId": "your_genre_link_id",
-  "NocoDbAttrLinkId": "your_attr_link_id",
+  "NocoDbGenreLinkId": "your_genre_link_column_id",
+  "NocoDbAttrLinkId": "your_attr_link_column_id",
   "PreferNocoDbTags": true,
+  "NocoDbMaxTags": 30,
   "NocoDbIgnoreSslErrors": false,
   "FallbackNocoDbScores": true
 }
 ```
 
-- **NocoDB**: 有設定時，優先以此庫的封面圖、繁體中文標籤與社群評分入庫（跳過外網延遲）。
-- **TavilyApiKey**: 空白 = 使用 Wayback Machine（免費）。設定後可在 Wayback 無快照時即時爬取 EGS 分數。
-- **PreferTavily**: `true` = 優先使用 Tavily 即時分數。
+| 欄位 | 預設 | 說明 |
+|---|---|---|
+| `TavilyApiKey` | 空 | 空白 = 只用 Wayback Machine（免費）。填了才會在 Wayback 無快照時抓 EGS live 值 |
+| `PreferTavily` | `false` | `true` = 優先用 Tavily live 分數，失敗才退 Wayback |
+| `NocoDbBaseUrl` / `NocoDbApiToken` / `NocoDbGamesTableId` | 空 | 三者齊備才會啟用 NocoDB 整合（缺 table id 會在 log 提示） |
+| `NocoDbGenreLinkId` / `NocoDbAttrLinkId` | 空 | 標籤 Links 欄位的**欄位 id**（`c` 開頭，非欄位名稱） |
+| `PreferNocoDbTags` | `true` | `true` = 只用 NocoDB 標籤；`false` = NocoDB 在前、續接 VNDB 標籤 |
+| `NocoDbMaxTags` | `30` | 標籤數上限，避免 Playnite 標籤清單被灌爆。`0` = 不限 |
+| `NocoDbIgnoreSslErrors` | `false` | 自建 NocoDB 用自簽憑證時設 `true`。**只會對該 host 免除憑證驗證**，Playnite 其餘連線照常驗證 |
+| `FallbackNocoDbScores` | `true` | `true` = 直接採用 NocoDB 已存的 EGS／VNDB 評分；`false` = 忽略該快取，一律走 Wayback／Tavily |
+
+查 Links 欄位 id：`GET {NocoDbBaseUrl}/api/v2/meta/tables/{tableId}`，在 `columns` 找 `uidt: "Links"` 的 `id`。
 
 ### 制限
 

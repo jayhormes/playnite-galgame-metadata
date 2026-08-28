@@ -17,7 +17,8 @@ namespace ErogameScapeMetadata
 
         public override Guid Id { get; } = Guid.Parse("b8e3f2a1-5c4d-4e6f-9a1b-2d3e4f5a6b7c");
 
-        public override string Name => "ErogameScape";
+        // NocoDB / VNDB / EGS / DLsite / DMM を束ねるため、UI 上の表示名は総称にする
+        public override string Name => "Galgame (NocoDB/VNDB)";
 
         public override List<MetadataField> SupportedFields { get; } = new List<MetadataField>
         {
