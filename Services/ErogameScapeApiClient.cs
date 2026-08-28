@@ -535,9 +535,10 @@ namespace ErogameScapeMetadata.Services
                         var span = sibling.SelectSingleNode(".//span[@class='bootstrap']");
                         var node = span ?? sibling;
 
-                        var text = HtmlEntity.DeEntitize(node.InnerHtml);
-                        // HTMLタグを改行とテキストに変換
-                        text = Regex.Replace(text, @"<br\s*/?>", "\n");
+                        // タグを先に処理し、実体参照の解決は最後の 1 回だけ。
+                        // 先に DeEntitize すると &amp;copy; が © まで戻り（二重デコード）、
+                        // &lt;script&gt; がタグ除去の巻き添えで消えることもある。
+                        var text = Regex.Replace(node.InnerHtml, @"<br\s*/?>", "\n", RegexOptions.IgnoreCase);
                         text = Regex.Replace(text, @"<[^>]+>", "");
                         text = HtmlEntity.DeEntitize(text).Trim();
 

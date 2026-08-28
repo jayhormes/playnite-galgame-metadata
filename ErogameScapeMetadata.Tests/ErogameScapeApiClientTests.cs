@@ -12,7 +12,8 @@ namespace ErogameScapeMetadata.Tests
         [Theory]
         [InlineData("アマカノ２", "アマカノ2")]
         [InlineData("ＡＢＣ　１２３", "abc 123")]
-        [InlineData("千恋＊万花　通常版", "千恋＊万花 通常版")]
+        // U+FF01-U+FF5E の全角記号は半角化されるため ＊ → *（比較用なので両辺が同じ規則なら問題ない）
+        [InlineData("千恋＊万花　通常版", "千恋*万花 通常版")]
         [InlineData("WHITE ALBUM2　～Closing Chapter～", "white album2 ~closing chapter~")]
         [InlineData("WHITE ALBUM2 〜Closing Chapter〜", "white album2 ~closing chapter~")]
         [InlineData("  Fate  /  stay   night  ", "fate / stay night")]
@@ -24,7 +25,7 @@ namespace ErogameScapeMetadata.Tests
 
         [Theory]
         [InlineData("アマカノ2 [初回限定版]", "アマカノ2")]
-        [InlineData("千恋＊万花 (DL版)", "千恋＊万花")]
+        [InlineData("千恋＊万花 (DL版)", "千恋*万花")]
         [InlineData("グリザイアの果実【パッケージ版】", "グリザイアの果実")]
         [InlineData("CLANNAD - Windows 10対応版", "clannad")]
         [InlineData("サノバウィッチ（通常版）", "サノバウィッチ")]
