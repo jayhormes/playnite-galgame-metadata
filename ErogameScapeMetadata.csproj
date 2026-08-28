@@ -10,6 +10,12 @@
     <Authors>minuspiral, jayhormes</Authors>
     <Description>Unified Galgame &amp; Visual Novel metadata provider for Playnite (NocoDB, VNDB, ErogameScape, DLsite, DMM)</Description>
   </PropertyGroup>
+  <!-- SDK スタイルの既定 glob はサブディレクトリの .cs も拾うため、
+       テストプロジェクトのソースを本体のコンパイル対象から除外する -->
+  <ItemGroup>
+    <Compile Remove="ErogameScapeMetadata.Tests/**" />
+    <None Remove="ErogameScapeMetadata.Tests/**" />
+  </ItemGroup>
   <ItemGroup>
     <PackageReference Include="PlayniteSDK" Version="6.11.0">
       <ExcludeAssets>runtime</ExcludeAssets>
