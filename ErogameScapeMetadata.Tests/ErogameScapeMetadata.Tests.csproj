@@ -13,9 +13,10 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Moq" Version="4.20.70" />
-    <PackageReference Include="PlayniteSDK" Version="6.11.0">
-      <ExcludeAssets>runtime</ExcludeAssets>
-    </PackageReference>
+    <!-- テストプロセスでは Playnite 本体が居ないので、SDK の dll を実際に配置する
+         （プラグイン本体側は Playnite が提供するため ExcludeAssets のままでよい） -->
+    <PackageReference Include="PlayniteSDK" Version="6.11.0" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="HtmlAgilityPack" Version="1.11.54" />
     <Reference Include="System.Net.Http" />
   </ItemGroup>

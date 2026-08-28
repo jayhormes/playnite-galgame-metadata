@@ -7,7 +7,7 @@ using Xunit;
 
 namespace ErogameScapeMetadata.Tests
 {
-    public class NocoDbClientTests
+    public class NocoDbClientTests : SerializationTestBase
     {
         private const string Base = "https://192.168.1.106:5555";
         private const string Table = "mk760gpjbh7yrqh";
