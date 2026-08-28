@@ -5,11 +5,13 @@ Packages:
     ReleaseDate: 2026-08-28
     PackageUrl: https://github.com/jayhormes/playnite-galgame-metadata/releases/download/v2.0.0/ErogameScapeMetadata.pext
     Changelog:
-      - Never contacts ErogameScape servers directly (site blocks unapproved IPs)
-      - Search now uses VNDB; EGS id resolved from VNDB release extlinks
-      - EGS scores fetched via Wayback Machine snapshots, optional Tavily Extract fallback for live values
-      - Community score falls back to VNDB rating when EGS data is unavailable
-      - Tags now sourced from VNDB (content tags); Series/Features fields removed
+      - Never contacts ErogameScape servers directly (the site blocks IPs that are not allow-listed)
+      - Search now uses VNDB; EGS, DLsite and DMM ids come from VNDB release extlinks
+      - Optional NocoDB integration for cover art, tags, scores, brand and release date
+      - EGS scores read from NocoDB, then a Wayback snapshot, then Tavily Extract if a key is set
+      - Community score falls back to the VNDB rating when no EGS data is available
+      - Tags come from NocoDB when configured, otherwise VNDB content tags
+      - Series and Features are no longer filled in; that data only existed in the EGS SQL API
   - Version: 1.0.2
     RequiredApiVersion: 6.11.0
     ReleaseDate: 2026-07-21
