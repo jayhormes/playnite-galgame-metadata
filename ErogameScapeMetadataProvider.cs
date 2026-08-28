@@ -39,8 +39,6 @@ namespace ErogameScapeMetadata
             MetadataField.Genres,
             MetadataField.Platform,
             MetadataField.AgeRating,
-            MetadataField.Series,
-            MetadataField.Features,
             MetadataField.Region,
         };
 
@@ -56,31 +54,79 @@ namespace ErogameScapeMetadata
             if (_searchCompleted)
                 return;
 
-            if (_requestOptions.IsBackgroundDownload)
+            try
             {
-                SearchAutomatic(ct);
+                if (_requestOptions.IsBackgroundDownload)
+                {
+                    SearchAutomatic(ct);
+                }
+                else
+                {
+                    SearchInteractive(ct);
+                }
             }
-            else
+            catch (Exception ex)
             {
-                SearchInteractive(ct);
+                _logger.Error(ex, "EnsureData 実行中にエラーが発生");
             }
-
-            _searchCompleted = true;
+            finally
+            {
+                _searchCompleted = true;
+            }
         }
 
         private void SearchAutomatic(CancellationToken ct)
         {
-            var gameName = _requestOptions.GameData.Name;
-            var results = Task.Run(() => _apiClient.SearchGamesAsync(gameName, ct))
-                .GetAwaiter().GetResult();
+            var gameName = _requestOptions.GameData?.Name;
+            if (string.IsNullOrWhiteSpace(gameName))
+                return;
 
-            var exactMatch = results.FirstOrDefault(
-                r => r.GameName == gameName);
-
-            if (exactMatch != null)
+            try
             {
-                _matchedGame = Task.Run(() => _apiClient.GetGameByIdAsync(exactMatch.Id, ct))
+                var results = Task.Run(() => _apiClient.SearchGamesAsync(gameName, ct))
                     .GetAwaiter().GetResult();
+
+                if (results == null || results.Count == 0)
+                {
+                    // ゲーム名に版数タグが含まれていた場合、接尾辞を除去して再検索
+                    var strippedQuery = ErogameScapeApiClient.NormalizeAndStripSuffix(gameName);
+                    if (!string.IsNullOrEmpty(strippedQuery) && strippedQuery != ErogameScapeApiClient.NormalizeForComparison(gameName))
+                    {
+                        results = Task.Run(() => _apiClient.SearchGamesAsync(strippedQuery, ct))
+                            .GetAwaiter().GetResult();
+                    }
+                }
+
+                if (results == null || results.Count == 0)
+                    return;
+
+                var normalized = ErogameScapeApiClient.NormalizeForComparison(gameName);
+                var strippedNormalized = ErogameScapeApiClient.NormalizeAndStripSuffix(gameName);
+
+                // 1. 完全一致（原題または英題）
+                var match = results.FirstOrDefault(r =>
+                    ErogameScapeApiClient.NormalizeForComparison(r.GameName) == normalized
+                    || (!string.IsNullOrEmpty(r.AltName)
+                        && ErogameScapeApiClient.NormalizeForComparison(r.AltName) == normalized));
+
+                // 2. 版数・タグ除去後の一致
+                if (match == null && !string.IsNullOrEmpty(strippedNormalized))
+                {
+                    match = results.FirstOrDefault(r =>
+                        ErogameScapeApiClient.NormalizeAndStripSuffix(r.GameName) == strippedNormalized
+                        || (!string.IsNullOrEmpty(r.AltName)
+                            && ErogameScapeApiClient.NormalizeAndStripSuffix(r.AltName) == strippedNormalized));
+                }
+
+                if (match != null)
+                {
+                    _matchedGame = Task.Run(() => _apiClient.GetGameDetailsAsync(match, ct))
+                        .GetAwaiter().GetResult();
+                }
+            }
+            catch (Exception ex) when (!(ex is OperationCanceledException) || !ct.IsCancellationRequested)
+            {
+                _logger.Warn($"自動検索エラー ({gameName}): {ex.Message}");
             }
         }
 
@@ -103,7 +149,7 @@ namespace ErogameScapeMetadata
                             searchResults = Task.Run(
                                 () => _apiClient.SearchGamesAsync(searchTerm, args.CancelToken))
                                 .GetAwaiter().GetResult();
-                        }, new GlobalProgressOptions("ErogameScapeを検索中...", true)
+                        }, new GlobalProgressOptions("VNDBを検索中...", true)
                         {
                             IsIndeterminate = true
                         });
@@ -122,7 +168,7 @@ namespace ErogameScapeMetadata
                         .ToList();
                     return itemOptions;
                 },
-                _requestOptions.GameData.Name);
+                _requestOptions.GameData?.Name ?? string.Empty);
 
             if (selectedItem != null && itemOptions != null)
             {
@@ -131,7 +177,7 @@ namespace ErogameScapeMetadata
                 {
                     var selected = searchResults[selectedIndex];
                     _matchedGame = Task.Run(
-                        () => _apiClient.GetGameByIdAsync(selected.Id, ct))
+                        () => _apiClient.GetGameDetailsAsync(selected, ct))
                         .GetAwaiter().GetResult();
                 }
             }
@@ -146,10 +192,10 @@ namespace ErogameScapeMetadata
             var details = new List<string>();
             if (game.SellDay.HasValue)
                 details.Add($"発売日: {game.SellDay.Value:yyyy-MM-dd}");
-            if (game.Median.HasValue)
-                details.Add($"中央値: {game.Median}");
-            if (game.ReviewCount.HasValue)
-                details.Add($"データ数: {game.ReviewCount}");
+            if (!string.IsNullOrEmpty(game.AltName))
+                details.Add(game.AltName);
+            if (!string.IsNullOrEmpty(game.VndbId))
+                details.Add(game.VndbId);
 
             var description = string.Join(" | ", details);
             return new GenericItemOption(title, description);
@@ -191,9 +237,18 @@ namespace ErogameScapeMetadata
         public override int? GetCommunityScore(GetMetadataFieldArgs args)
         {
             EnsureData(args.CancelToken);
-            if (_matchedGame?.Median == null)
+            if (_matchedGame == null)
                 return base.GetCommunityScore(args);
-            return _matchedGame.Median.Value;
+
+            // EGS 中央値（有効なスコア・投票数 > 0）を最優先
+            if (_matchedGame.Median.HasValue && _matchedGame.Median.Value > 0 && (_matchedGame.ReviewCount ?? 1) > 0)
+                return _matchedGame.Median.Value;
+
+            // EGS スコアが無い、または0件の場合は VNDB rating（10-100）で代替
+            if (_matchedGame.VndbRating.HasValue)
+                return (int)Math.Round(_matchedGame.VndbRating.Value);
+
+            return base.GetCommunityScore(args);
         }
 
         public override MetadataFile GetBackgroundImage(GetMetadataFieldArgs args)
@@ -230,12 +285,18 @@ namespace ErogameScapeMetadata
         public override MetadataFile GetCoverImage(GetMetadataFieldArgs args)
         {
             EnsureData(args.CancelToken);
-            var url = _matchedGame?.GetCoverImageUrl();
-            if (url == null)
+            if (_matchedGame == null)
                 return base.GetCoverImage(args);
 
-            return DownloadAsMetadataFile(url, 600, args.CancelToken)
-                ?? base.GetCoverImage(args);
+            var candidates = _matchedGame.GetCoverImageCandidates();
+            foreach (var url in candidates)
+            {
+                var file = DownloadAsMetadataFile(url, 600, args.CancelToken);
+                if (file != null)
+                    return file;
+            }
+
+            return base.GetCoverImage(args);
         }
 
         private MetadataFile DownloadAsMetadataFile(
@@ -250,7 +311,9 @@ namespace ErogameScapeMetadata
                 {
                     data = ResizeImageIfNeeded(data, maxWidth);
                     var uri = new Uri(url);
-                    var fileName = uri.Segments[uri.Segments.Length - 1];
+                    var fileName = Path.GetFileName(uri.LocalPath);
+                    if (string.IsNullOrEmpty(fileName))
+                        fileName = "cover.jpg";
                     return new MetadataFile(fileName, data);
                 }
             }
@@ -264,28 +327,36 @@ namespace ErogameScapeMetadata
 
         private static byte[] ResizeImageIfNeeded(byte[] imageData, int maxWidth)
         {
-            using (var ms = new MemoryStream(imageData))
-            using (var original = Image.FromStream(ms))
+            try
             {
-                if (original.Width <= maxWidth)
-                    return imageData;
-
-                var ratio = (double)maxWidth / original.Width;
-                var newWidth = maxWidth;
-                var newHeight = (int)(original.Height * ratio);
-
-                using (var resized = new Bitmap(newWidth, newHeight))
-                using (var g = Graphics.FromImage(resized))
+                using (var ms = new MemoryStream(imageData))
+                using (var original = Image.FromStream(ms))
                 {
-                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                    g.DrawImage(original, 0, 0, newWidth, newHeight);
+                    if (original.Width <= maxWidth)
+                        return imageData;
 
-                    using (var output = new MemoryStream())
+                    var ratio = (double)maxWidth / original.Width;
+                    var newWidth = maxWidth;
+                    var newHeight = (int)(original.Height * ratio);
+
+                    using (var resized = new Bitmap(newWidth, newHeight))
+                    using (var g = Graphics.FromImage(resized))
                     {
-                        resized.Save(output, ImageFormat.Jpeg);
-                        return output.ToArray();
+                        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                        g.DrawImage(original, 0, 0, newWidth, newHeight);
+
+                        using (var output = new MemoryStream())
+                        {
+                            resized.Save(output, ImageFormat.Jpeg);
+                            return output.ToArray();
+                        }
                     }
                 }
+            }
+            catch
+            {
+                // WebP や非標準フォーマットで GDI+ が失敗した場合は、変換せず元のバイト列を返す
+                return imageData;
             }
         }
 
@@ -295,18 +366,15 @@ namespace ErogameScapeMetadata
             if (_matchedGame == null)
                 return base.GetLinks(args);
 
-            var links = new List<Link>
-            {
-                new Link("ErogameScape", _matchedGame.GetErogameScapeUrl())
-            };
+            var links = new List<Link>();
 
-            if (!string.IsNullOrEmpty(_matchedGame.BrandUrl))
-                links.Add(new Link("公式サイト", _matchedGame.BrandUrl));
+            var egsUrl = _matchedGame.GetErogameScapeUrl();
+            if (egsUrl != null)
+                links.Add(new Link("ErogameScape", egsUrl));
 
-            if (!string.IsNullOrEmpty(_matchedGame.Shoukai)
-                && _matchedGame.Shoukai.StartsWith("http")
-                && _matchedGame.Shoukai != _matchedGame.BrandUrl)
-                links.Add(new Link("紹介ページ", _matchedGame.Shoukai));
+            var vndbUrl = _matchedGame.GetVndbUrl();
+            if (vndbUrl != null)
+                links.Add(new Link("VNDB", vndbUrl));
 
             if (!string.IsNullOrEmpty(_matchedGame.DlsiteId))
             {
@@ -363,29 +431,11 @@ namespace ErogameScapeMetadata
         public override IEnumerable<MetadataProperty> GetAgeRatings(GetMetadataFieldArgs args)
         {
             EnsureData(args.CancelToken);
-            if (_matchedGame == null)
+            if (_matchedGame?.MinAge == null)
                 return base.GetAgeRatings(args);
 
-            var rating = _matchedGame.IsEroge ? "18+" : "全年齢";
+            var rating = _matchedGame.MinAge.Value >= 18 ? "18+" : "全年齢";
             return new[] { new MetadataNameProperty(rating) };
-        }
-
-        public override IEnumerable<MetadataProperty> GetSeries(GetMetadataFieldArgs args)
-        {
-            EnsureData(args.CancelToken);
-            if (_matchedGame == null || string.IsNullOrEmpty(_matchedGame.SeriesName))
-                return base.GetSeries(args);
-
-            return new[] { new MetadataNameProperty(_matchedGame.SeriesName) };
-        }
-
-        public override IEnumerable<MetadataProperty> GetFeatures(GetMetadataFieldArgs args)
-        {
-            EnsureData(args.CancelToken);
-            if (_matchedGame == null || _matchedGame.Features == null || _matchedGame.Features.Count == 0)
-                return base.GetFeatures(args);
-
-            return _matchedGame.Features.Select(f => new MetadataNameProperty(f));
         }
 
         public override IEnumerable<MetadataProperty> GetRegions(GetMetadataFieldArgs args)

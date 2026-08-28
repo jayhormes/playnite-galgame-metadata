@@ -12,180 +12,287 @@ using System.Threading.Tasks;
 
 namespace ErogameScapeMetadata.Services
 {
+    // 2.0.0 リファクタ：EGS 本体（SQL API 含む）へは一切アクセスしない。
+    //   検索         → VNDB kana API
+    //   EGS id 解決  → VNDB release extlinks（DLsite/DMM id も同時に取得）
+    //   EGS スコア   → Wayback 快照 → Tavily Extract（EgsStatsClient）
+    //   補完         → DLsite API / Getchu / VNDB（従来どおり、これらは EGS ではない）
     public class ErogameScapeApiClient
     {
         private static readonly HttpClient HttpClient;
-        private static DateTime _lastRequestTime = DateTime.MinValue;
-        private static readonly object _rateLimitLock = new object();
-        private const int RateLimitMs = 2500;
-
-        private const string SqlEndpoint =
-            "https://erogamescape.dyndns.org/~ap2/ero/toukei_kaiseki/sql_for_erogamer_form.php";
-
-        private const string VndbApiEndpoint = "https://api.vndb.org/kana/vn";
 
         private const int TbaYearThreshold = 2030;
+        private const int MaxVndbTags = 15;
 
         private readonly ILogger _logger;
+        private readonly VndbClient _vndb;
+        private readonly EgsStatsClient _egsStats;
+        private readonly NocoDbClient _nocoDb;
+        private readonly bool _preferNocoDbTags;
+        private readonly bool _fallbackNocoDbScores;
 
         static ErogameScapeApiClient()
         {
             HttpClient = new HttpClient();
             HttpClient.DefaultRequestHeaders.UserAgent.ParseAdd(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-            HttpClient.Timeout = TimeSpan.FromSeconds(15);
+            HttpClient.Timeout = TimeSpan.FromSeconds(30);
         }
 
-        public ErogameScapeApiClient(ILogger logger)
+        public ErogameScapeApiClient(ILogger logger, PluginConfig config)
         {
             _logger = logger;
+            _vndb = new VndbClient(HttpClient, logger);
+            _egsStats = new EgsStatsClient(HttpClient, logger,
+                config?.TavilyApiKey, config?.PreferTavily ?? false);
+            _nocoDb = new NocoDbClient(HttpClient, logger,
+                config?.NocoDbBaseUrl, config?.NocoDbApiToken,
+                config?.NocoDbGamesTableId, config?.NocoDbGenreLinkId, config?.NocoDbAttrLinkId,
+                config?.NocoDbIgnoreSslErrors ?? true);
+            _preferNocoDbTags = config?.PreferNocoDbTags ?? true;
+            _fallbackNocoDbScores = config?.FallbackNocoDbScores ?? true;
         }
 
         public async Task<List<ErogameScapeGameInfo>> SearchGamesAsync(
             string keyword, CancellationToken ct = default)
         {
-            // LIKEワイルドカードのエスケープ。'はhexエンコードでバイト0x27として復元されるためエスケープ不要。
-            var escapedKeyword = keyword
-                .Replace("!", "!!")
-                .Replace("%", "!%")
-                .Replace("_", "!_");
-            var keywordLiteral = BuildSqlJapaneseLiteral(escapedKeyword);
-            var sql = $"SELECT g.id, g.gamename, g.furigana, g.sellday, g.median, g.count2, " +
-                      $"b.brandname " +
-                      $"FROM gamelist g LEFT JOIN brandlist b ON g.brandname = b.id " +
-                      $"WHERE g.gamename LIKE '%' || {keywordLiteral} || '%' ESCAPE '!' " +
-                      $"ORDER BY g.count2 DESC LIMIT 30";
-
-            var rows = await ExecuteSqlAsync(sql, ct);
-            return rows.Select(row => new ErogameScapeGameInfo
+            var vns = await _vndb.SearchAsync(keyword, ct);
+            return vns.Select(v => new ErogameScapeGameInfo
             {
-                Id = int.Parse(row["id"]),
-                GameName = row.GetValueOrDefault("gamename"),
-                Furigana = row.GetValueOrDefault("furigana"),
-                BrandName = row.GetValueOrDefault("brandname"),
-                SellDay = ParseDate(row.GetValueOrDefault("sellday")),
-                Median = ParseInt(row.GetValueOrDefault("median")),
-                ReviewCount = ParseInt(row.GetValueOrDefault("count2")),
+                VndbId = v.Id,
+                GameName = v.DisplayName,
+                AltName = string.IsNullOrEmpty(v.AltTitle) ? null : v.Title,
+                BrandName = v.Developers?.FirstOrDefault()?.DisplayName,
+                SellDay = ParseDate(v.Released),
             }).ToList();
         }
 
-        public async Task<ErogameScapeGameInfo> GetGameByIdAsync(
-            int gameId, CancellationToken ct = default)
+        public async Task<ErogameScapeGameInfo> GetGameDetailsAsync(
+            ErogameScapeGameInfo stub, CancellationToken ct = default)
         {
-            var sql = $"SELECT g.id, g.gamename, g.furigana, g.sellday, g.median, g.average2, g.count2, " +
-                      $"g.dmm, g.dmm_subsc, g.genre, g.shoukai, g.dlsite_id, g.dlsite_domain, " +
-                      $"g.erogame, b.brandname, b.url " +
-                      $"FROM gamelist g LEFT JOIN brandlist b ON g.brandname = b.id " +
-                      $"WHERE g.id = {gameId}";
-
-            var rows = await ExecuteSqlAsync(sql, ct);
-            if (rows.Count == 0)
+            if (stub?.VndbId == null)
                 return null;
 
-            var row = rows[0];
+            // VNDB 詳細と release extlinks を並列取得
+            var detailTask = _vndb.GetDetailAsync(stub.VndbId, ct);
+            var releasesTask = _vndb.GetReleasesAsync(stub.VndbId, ct);
+            await Task.WhenAll(detailTask, releasesTask);
+
+            var vn = detailTask.Result;
+            if (vn == null)
+                return null;
+
             var game = new ErogameScapeGameInfo
             {
-                Id = int.Parse(row["id"]),
-                GameName = row.GetValueOrDefault("gamename"),
-                Furigana = row.GetValueOrDefault("furigana"),
-                BrandName = row.GetValueOrDefault("brandname"),
-                BrandUrl = row.GetValueOrDefault("url"),
-                SellDay = ParseDate(row.GetValueOrDefault("sellday")),
-                Median = ParseInt(row.GetValueOrDefault("median")),
-                Average = ParseInt(row.GetValueOrDefault("average2")),
-                ReviewCount = ParseInt(row.GetValueOrDefault("count2")),
-                DmmId = NullIfEmpty(row.GetValueOrDefault("dmm")),
-                DmmSubsc = NullIfEmpty(row.GetValueOrDefault("dmm_subsc")),
-                OfficialGenre = NullIfEmpty(row.GetValueOrDefault("genre")),
-                Shoukai = NullIfEmpty(row.GetValueOrDefault("shoukai")),
-                DlsiteId = NullIfEmpty(row.GetValueOrDefault("dlsite_id")),
-                DlsiteDomain = NullIfEmpty(row.GetValueOrDefault("dlsite_domain")),
-                IsEroge = row.GetValueOrDefault("erogame") == "t",
+                VndbId = vn.Id,
+                GameName = vn.DisplayName,
+                AltName = string.IsNullOrEmpty(vn.AltTitle) ? null : vn.Title,
+                BrandName = vn.Developers?.FirstOrDefault()?.DisplayName,
+                SellDay = ParseDate(vn.Released),
+                VndbRating = vn.Rating,
             };
 
-            // タグ・シリーズ・特徴を1回のSQLで取得
-            await EnrichTagsSeriesFeaturesAsync(game, gameId, ct);
+            ApplyExtLinks(game, releasesTask.Result);
+            ApplyVndbImages(game, vn);
+            ApplyVndbTags(game, vn);
 
-            // DLsite と VNDB を並列実行（異なるサービスなので同時リクエスト可能）
-            var dlsiteTask = EnrichFromDlsiteAsync(game, ct);
-            var vndbTask = FetchVndbDataAsync(game.GameName, ct);
-            await Task.WhenAll(dlsiteTask, vndbTask);
+            // NocoDB 整合（最優先：若存在 NocoDB 記錄，以 NocoDB 的封面圖、標籤、評分與品牌為主）
+            if (_nocoDb.IsConfigured)
+            {
+                var nocoData = await _nocoDb.GetGameDataAsync(game.VndbId, game.EgsId, game.GameName, ct);
+                if (nocoData != null)
+                {
+                    // 1. 封面圖優先採用 NocoDB
+                    if (!string.IsNullOrEmpty(nocoData.CoverImageUrl))
+                    {
+                        game.NocoDbCoverImageUrl = nocoData.CoverImageUrl;
+                    }
 
-            var vndb = vndbTask.Result;
-            game.BackgroundImageUrls = vndb.ScreenshotUrls;
-            game.VndbCoverImageUrl = vndb.CoverImageUrl;
-            game.VndbCoverIsPortrait = vndb.CoverIsPortrait;
+                    // 2. 標籤優先採用 NocoDB
+                    if (nocoData.Tags != null && nocoData.Tags.Count > 0)
+                    {
+                        if (_preferNocoDbTags)
+                        {
+                            game.Tags = nocoData.Tags;
+                        }
+                        else
+                        {
+                            foreach (var tag in game.Tags)
+                            {
+                                if (!nocoData.Tags.Contains(tag))
+                                    nocoData.Tags.Add(tag);
+                            }
+                            game.Tags = nocoData.Tags;
+                        }
+                    }
 
-            // あらすじのフォールバック: DLsite → Getchu(日本語) → 批評空間shoukai(テキスト) → VNDB(英語)
+                    // 3. EGS 評分優先採用 NocoDB 常態更新的分數
+                    if (nocoData.EgsScore.HasValue && nocoData.EgsScore.Value > 0)
+                    {
+                        game.Median = nocoData.EgsScore.Value;
+                        game.ReviewCount = nocoData.EgsCount;
+                        game.EgsSource = "nocodb";
+                    }
+
+                    // 4. VNDB 評分優先採用 NocoDB
+                    if (nocoData.VndbScore.HasValue && nocoData.VndbScore.Value > 0)
+                    {
+                        game.VndbRating = nocoData.VndbScore;
+                    }
+
+                    // 5. 品牌名稱
+                    if (!string.IsNullOrEmpty(nocoData.BrandName))
+                    {
+                        game.BrandName = nocoData.BrandName;
+                    }
+
+                    // 6. 發售日
+                    if (nocoData.ReleaseDate.HasValue)
+                    {
+                        game.SellDay = nocoData.ReleaseDate.Value;
+                    }
+                }
+            }
+
+            // EGS スコア（NocoDB にスコアが無い場合のみ Wayback → Tavily を実行）
+            if (!game.Median.HasValue)
+            {
+                if (game.EgsId.HasValue)
+                {
+                    var stats = await _egsStats.GetStatsAsync(game.EgsId.Value, ct);
+                    if (stats != null)
+                    {
+                        game.Median = stats.Median;
+                        game.ReviewCount = stats.Count;
+                        game.EgsSource = stats.Source;
+                        game.EgsSnapshotDate = stats.SnapshotDate;
+                    }
+                }
+                else
+                {
+                    _logger.Info($"VNDB {vn.Id} に EGS リンクなし（スコアは VNDB rating フォールバック）");
+                }
+            }
+
+            // あらすじのフォールバック: DLsite → Getchu(日本語) → VNDB(英語)
+            await EnrichFromDlsiteAsync(game, ct);
             if (string.IsNullOrEmpty(game.Description))
             {
                 await EnrichDescriptionFromGetchuAsync(game, ct);
             }
-            if (string.IsNullOrEmpty(game.Description))
+            if (string.IsNullOrEmpty(game.Description) && !string.IsNullOrEmpty(vn.Description))
             {
-                if (!string.IsNullOrEmpty(game.Shoukai) && !game.Shoukai.StartsWith("http"))
-                {
-                    game.Description = game.Shoukai;
-                }
-                else if (!string.IsNullOrEmpty(vndb.Description))
-                {
-                    game.Description = vndb.Description;
-                }
-            }
-
-            // DLsiteからジャンルが取れなかった場合、公式ジャンルをフォールバック
-            if (game.Genres.Count == 0 && !string.IsNullOrEmpty(game.OfficialGenre))
-            {
-                game.Genres.Add(game.OfficialGenre);
+                // VNDB の BBCode タグを除去
+                game.Description = Regex.Replace(vn.Description, @"\[/?[a-z]+(?:=[^\]]+)?\]", "").Trim();
             }
 
             return game;
         }
 
-        private async Task EnrichTagsSeriesFeaturesAsync(
-            ErogameScapeGameInfo game, int gameId, CancellationToken ct)
+        internal void ApplyExtLinks(ErogameScapeGameInfo game, List<VndbRelease> releases)
         {
-            // タグ・シリーズ・特徴を1回のSQLで取得（レート制限の待機を削減）
-            var sql = $"(SELECT 'tag' AS src, p.title AS val, p.system_group AS grp, pt.count AS cnt " +
-                      $"FROM povgroups_toukei pt JOIN povlist p ON pt.pov = p.id " +
-                      $"WHERE pt.game = {gameId} ORDER BY pt.count DESC) " +
-                      $"UNION ALL " +
-                      $"(SELECT 'series', g.name, '', 0 " +
-                      $"FROM belong_to_gamegroup_list b JOIN gamegrouplist g ON b.gamegroup = g.id " +
-                      $"WHERE b.game = {gameId} LIMIT 1) " +
-                      $"UNION ALL " +
-                      $"(SELECT 'feature', al.title, '', 0 " +
-                      $"FROM attributegroupsboolean ab JOIN attributelist al ON ab.attribute = al.id " +
-                      $"WHERE ab.game = {gameId} AND ab.boolean = true)";
+            if (releases == null)
+                return;
 
-            var rows = await ExecuteSqlAsync(sql, ct);
-
-            foreach (var row in rows)
+            foreach (var release in releases)
             {
-                var src = row.GetValueOrDefault("src");
-                var val = row.GetValueOrDefault("val") ?? "";
-
-                if (src == "tag")
+                if (release.MinAge.HasValue)
                 {
-                    var grp = row.GetValueOrDefault("grp") ?? "";
-                    var count = ParseInt(row.GetValueOrDefault("cnt")) ?? 0;
-                    if (count >= 2 && (grp == "ジャンル" || grp == "背景" || grp == "傾向"))
+                    game.MinAge = Math.Max(game.MinAge ?? 0, release.MinAge.Value);
+                }
+
+                if (release.ExtLinks == null)
+                    continue;
+
+                foreach (var link in release.ExtLinks)
+                {
+                    var url = link.Url ?? "";
+
+                    if (game.EgsId == null)
                     {
-                        var tag = SimplifyPovTitle(val);
-                        if (!string.IsNullOrEmpty(tag))
-                            game.Tags.Add(tag);
+                        var egs = Regex.Match(url, @"game\.php\?.*[?&]game=(\d+)|game\.php\?game=(\d+)|\bgame=(\d+)");
+                        var egsIdStr = egs.Groups[1].Success ? egs.Groups[1].Value
+                            : egs.Groups[2].Success ? egs.Groups[2].Value
+                            : egs.Groups[3].Value;
+                        if (!string.IsNullOrEmpty(egsIdStr) && int.TryParse(egsIdStr, out var egsId))
+                        {
+                            game.EgsId = egsId;
+                        }
+                    }
+
+                    if (game.DlsiteId == null)
+                    {
+                        var dlsite = Regex.Match(url, @"dlsite\.com/([a-zA-Z-]+)/.*?product_id/([a-zA-Z0-9_]+)", RegexOptions.IgnoreCase);
+                        if (dlsite.Success)
+                        {
+                            game.DlsiteDomain = dlsite.Groups[1].Value.ToLowerInvariant();
+                            game.DlsiteId = dlsite.Groups[2].Value.ToUpperInvariant();
+                        }
+                    }
+
+                    if (game.DmmId == null)
+                    {
+                        var dmm = Regex.Match(url, @"dlsoft\.dmm\.co\.jp/detail/([a-zA-Z0-9_]+)|(?:dmm\.co\.jp|dmm\.com)/.*?cid=([a-zA-Z0-9_]+)|games\.dmm\.co\.jp/detail/([a-zA-Z0-9_]+)", RegexOptions.IgnoreCase);
+                        if (dmm.Success)
+                        {
+                            var dmmIdStr = dmm.Groups[1].Success ? dmm.Groups[1].Value
+                                : dmm.Groups[2].Success ? dmm.Groups[2].Value
+                                : dmm.Groups[3].Value;
+                            if (!string.IsNullOrEmpty(dmmIdStr))
+                            {
+                                game.DmmId = dmmIdStr;
+                            }
+                        }
+                    }
+
+                    if (game.GetchuId == null)
+                    {
+                        var getchu = Regex.Match(url, @"getchu\.com/soft\.phtml\?id=(\d+)", RegexOptions.IgnoreCase);
+                        if (getchu.Success)
+                        {
+                            game.GetchuId = getchu.Groups[1].Value;
+                        }
                     }
                 }
-                else if (src == "series")
+            }
+        }
+
+        internal static void ApplyVndbImages(ErogameScapeGameInfo game, VndbVn vn)
+        {
+            if (vn.Image != null && vn.Image.IsSafe && !string.IsNullOrEmpty(vn.Image.Url))
+            {
+                game.VndbCoverImageUrl = vn.Image.Url;
+                game.VndbCoverIsPortrait = vn.Image.IsPortrait;
+            }
+
+            if (vn.Screenshots == null)
+                return;
+
+            foreach (var shot in vn.Screenshots)
+            {
+                if (shot.IsSafe && !string.IsNullOrEmpty(shot.Url) && shot.Url != game.VndbCoverImageUrl)
                 {
-                    if (string.IsNullOrEmpty(game.SeriesName))
-                        game.SeriesName = NullIfEmpty(val);
+                    game.BackgroundImageUrls.Add(shot.Url);
                 }
-                else if (src == "feature")
-                {
-                    if (!string.IsNullOrEmpty(val))
-                        game.Features.Add(val);
-                }
+            }
+        }
+
+        internal static void ApplyVndbTags(ErogameScapeGameInfo game, VndbVn vn)
+        {
+            if (vn.Tags == null)
+                return;
+
+            var tags = vn.Tags
+                .Where(t => t.Category == "cont"
+                            && (t.Rating ?? 0) >= 2.0
+                            && (t.Spoiler ?? 0) < 0.5
+                            && !string.IsNullOrEmpty(t.Name))
+                .OrderByDescending(t => t.Rating ?? 0)
+                .Take(MaxVndbTags);
+
+            foreach (var tag in tags)
+            {
+                game.Tags.Add(tag.Name);
             }
         }
 
@@ -197,7 +304,6 @@ namespace ErogameScapeMetadata.Services
 
             try
             {
-                // DLsite APIはレート制限の対象外（別サービス）だが礼儀として少し待つ
                 var apiUrl = $"https://www.dlsite.com/{game.DlsiteDomain ?? "pro"}/api/=/product.json?workno={game.DlsiteId}";
                 _logger.Info($"DLsite API: {apiUrl}");
 
@@ -210,8 +316,15 @@ namespace ErogameScapeMetadata.Services
                     // JSON内の \/ エスケープを解除（URLやテキスト抽出を容易にする）
                     json = json.Replace("\\/", "/");
 
-                    // intro_s（あらすじ短縮版）を取得
-                    game.Description = ExtractJsonString(json, "intro_s");
+                    // intro_s（あらすじ短縮版）を取得し、HTML タグと実体参照を整形
+                    var intro = ExtractJsonString(json, "intro_s");
+                    if (!string.IsNullOrWhiteSpace(intro))
+                    {
+                        intro = Regex.Replace(intro, @"<br\s*/?>", "\n");
+                        intro = Regex.Replace(intro, @"<[^>]+>", "");
+                        intro = System.Net.WebUtility.HtmlDecode(intro).Trim();
+                        game.Description = intro;
+                    }
 
                     // ジャンルを取得: "genres":[{"name":"お姉さん",...},...]
                     var genreSection = Regex.Match(json, @"""genres""\s*:\s*\[(.*?)\]");
@@ -241,12 +354,30 @@ namespace ErogameScapeMetadata.Services
         public async Task EnrichDescriptionFromGetchuAsync(
             ErogameScapeGameInfo game, CancellationToken ct = default)
         {
+            // 1. VNDB extlinks から既に Getchu ID が解決されている場合は直接あらすじを取得（検索不要）
+            if (!string.IsNullOrEmpty(game.GetchuId))
+            {
+                try
+                {
+                    var desc = await FetchGetchuDescriptionAsync(game.GetchuId, ct);
+                    if (!string.IsNullOrEmpty(desc))
+                    {
+                        game.Description = desc;
+                        return;
+                    }
+                }
+                catch (Exception ex) when (!(ex is OperationCanceledException) || !ct.IsCancellationRequested)
+                {
+                    _logger.Warn($"Getchu直接取得エラー ({game.GetchuId}): {ex.Message}");
+                }
+            }
+
             if (string.IsNullOrEmpty(game.GameName))
                 return;
 
+            // 2. Getchu ID が未解決の場合はゲーム名で検索（キーワードはEUC-JPエンコード）
             try
             {
-                // Getchuでゲーム名を検索（キーワードはUTF-8だと0件になるためEUC-JPでエンコード）
                 var searchUrl = "https://www.getchu.com/php/nsearch.phtml"
                     + "?genre=pc_soft&search_type=match&search_keyword="
                     + EscapeEucJp(game.GameName);
@@ -280,15 +411,13 @@ namespace ErogameScapeMetadata.Services
                     }
                 }
             }
-            // HttpClientのタイムアウトもTaskCanceledExceptionを投げるため、
-            // 実際にキャンセル要求があった場合のみ伝播させる
             catch (Exception ex) when (!(ex is OperationCanceledException) || !ct.IsCancellationRequested)
             {
                 _logger.Warn($"Getchu検索エラー ({game.GameName}): {ex.Message}");
             }
         }
 
-        private List<string> FindGetchuIdsByTitle(string html, string gameName)
+        internal List<string> FindGetchuIdsByTitle(string html, string gameName)
         {
             var ids = new List<string>();
             var doc = new HtmlDocument();
@@ -296,8 +425,8 @@ namespace ErogameScapeMetadata.Services
 
             var normalized = NormalizeForComparison(gameName);
 
-            // <a href="soft.phtml?id=XXXXX" class="blueb">タイトル</a> を探す
-            var links = doc.DocumentNode.SelectNodes("//a[contains(@href,'soft.phtml?id=') and @class='blueb']");
+            // <a href="soft.phtml?id=XXXXX">タイトル</a> を探す（class 名の変更に耐えられるよう柔軟に一致）
+            var links = doc.DocumentNode.SelectNodes("//a[contains(@href,'soft.phtml?id=')]");
             if (links == null)
                 return ids;
 
@@ -353,7 +482,7 @@ namespace ErogameScapeMetadata.Services
             }
         }
 
-        private static string ExtractGetchuSection(HtmlDocument doc, string sectionTitle)
+        internal static string ExtractGetchuSection(HtmlDocument doc, string sectionTitle)
         {
             // <h2 class="tabletitle ...">セクション名</h2> の次の <div class="tablebody"> 内テキスト
             var headers = doc.DocumentNode.SelectNodes("//h2[contains(@class,'tabletitle')]");
@@ -392,7 +521,7 @@ namespace ErogameScapeMetadata.Services
             return null;
         }
 
-        private static string ExtractJsonString(string json, string key)
+        internal static string ExtractJsonString(string json, string key)
         {
             // "key":"value" or "key":null のパターンを抽出
             var pattern = $@"""{Regex.Escape(key)}""\s*:\s*""((?:[^""\\]|\\.)*)""";
@@ -415,212 +544,11 @@ namespace ErogameScapeMetadata.Services
             return string.IsNullOrWhiteSpace(value) ? null : value;
         }
 
-        private static string SimplifyPovTitle(string title)
-        {
-            // 「SF仕立てのゲーム」→「SF」、「夏ゲー」→「夏」等
-            var suffixes = new[] {
-                "仕立てのゲーム", "のゲーム", "ゲーム", "ゲー",
-                "なゲーム", "な作品", "系のゲーム", "系ゲーム"
-            };
-            foreach (var s in suffixes)
-            {
-                if (title.EndsWith(s) && title.Length > s.Length)
-                    return title.Substring(0, title.Length - s.Length);
-            }
-            return title;
-        }
-
-        public async Task<VndbResult> FetchVndbDataAsync(
-            string gameName, CancellationToken ct = default)
-        {
-            var result = new VndbResult();
-            if (string.IsNullOrEmpty(gameName))
-                return result;
-
-            try
-            {
-                // ステップ1: タイトル検索で候補を取得し、タイトル一致するエントリのIDを特定
-                var vndbId = await FindVndbIdByTitleAsync(gameName, ct);
-                if (vndbId == null)
-                    return result;
-
-                // ステップ2: IDで詳細データを取得
-                var detailBody = $"{{\"filters\":[\"id\",\"=\",\"{vndbId}\"]," +
-                    $"\"fields\":\"title,description,image.url,image.dims,image.sexual,image.violence,screenshots.url,screenshots.sexual,screenshots.violence\"," +
-                    $"\"results\":1}}";
-
-                _logger.Info($"VNDB API詳細取得: {vndbId}");
-
-                using (var content = new StringContent(detailBody, System.Text.Encoding.UTF8, "application/json"))
-                using (var response = await HttpClient.PostAsync(VndbApiEndpoint, content, ct))
-                {
-                    if (!response.IsSuccessStatusCode)
-                        return result;
-
-                    var json = await response.Content.ReadAsStringAsync();
-                    json = json.Replace("\\/", "/");
-
-                    // あらすじを取得
-                    var descValue = ExtractJsonString(json, "description");
-                    if (!string.IsNullOrEmpty(descValue))
-                    {
-                        // VNDBのBBCodeタグを除去
-                        result.Description = Regex.Replace(descValue, @"\[/?[a-z]+(?:=[^\]]+)?\]", "").Trim();
-                    }
-
-                    // カバー画像を取得（SFW・縦長優先）
-                    // "image":{"dims":[w,h],"sexual":0,"url":"...","violence":0} の形式
-                    var imageSection = Regex.Match(json, @"""image""\s*:\s*\{([^{}]*(?:\[[^\]]*\][^{}]*)*)\}");
-                    if (imageSection.Success)
-                    {
-                        var imgBlock = imageSection.Groups[1].Value;
-                        var imgUrl = Regex.Match(imgBlock, @"""url""\s*:\s*""([^""]+)""");
-                        var imgSexual = Regex.Match(imgBlock, @"""sexual""\s*:\s*([\d.]+)");
-                        var imgViolence = Regex.Match(imgBlock, @"""violence""\s*:\s*([\d.]+)");
-                        var imgDims = Regex.Match(imgBlock, @"""dims""\s*:\s*\[(\d+)\s*,\s*(\d+)\]");
-
-                        if (imgUrl.Success && imgSexual.Success && imgViolence.Success
-                            && double.TryParse(imgSexual.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var s)
-                            && double.TryParse(imgViolence.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var v)
-                            && s < 1.0 && v < 1.0)
-                        {
-                            result.CoverImageUrl = imgUrl.Groups[1].Value;
-
-                            // 縦長判定（dims取得可能な場合）
-                            if (imgDims.Success
-                                && int.TryParse(imgDims.Groups[1].Value, out var w)
-                                && int.TryParse(imgDims.Groups[2].Value, out var h))
-                            {
-                                result.CoverIsPortrait = h > w;
-                            }
-                        }
-                    }
-
-                    // screenshotsの各エントリを抽出し、SFWのみフィルタリング
-                    // カバー画像と同じURLは背景画像から除外
-                    var screenshotSection = Regex.Match(json, @"""screenshots""\s*:\s*\[(.*)\]");
-                    if (screenshotSection.Success)
-                    {
-                        var screenshotsJson = screenshotSection.Groups[1].Value;
-                        var objectMatches = Regex.Matches(screenshotsJson,
-                            @"\{[^{}]*\}");
-
-                        foreach (Match obj in objectMatches)
-                        {
-                            var block = obj.Value;
-                            var urlMatch = Regex.Match(block, @"""url""\s*:\s*""([^""]+)""");
-                            var sexualMatch = Regex.Match(block, @"""sexual""\s*:\s*([\d.]+)");
-                            var violenceMatch = Regex.Match(block, @"""violence""\s*:\s*([\d.]+)");
-
-                            if (!urlMatch.Success || !sexualMatch.Success || !violenceMatch.Success)
-                                continue;
-
-                            var url = urlMatch.Groups[1].Value;
-                            if (url == result.CoverImageUrl)
-                                continue;
-
-                            if (double.TryParse(sexualMatch.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var sexual)
-                                && double.TryParse(violenceMatch.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var violence)
-                                && sexual < 1.0 && violence < 1.0)
-                            {
-                                result.ScreenshotUrls.Add(url);
-                            }
-                        }
-                    }
-
-                    _logger.Info($"VNDB: あらすじ={!string.IsNullOrEmpty(result.Description)}, カバー={!string.IsNullOrEmpty(result.CoverImageUrl)}, SFWスクリーンショット={result.ScreenshotUrls.Count}件");
-                }
-            }
-            // HttpClientのタイムアウトもTaskCanceledExceptionを投げるため、
-            // 実際にキャンセル要求があった場合のみ伝播させる
-            catch (Exception ex) when (!(ex is OperationCanceledException) || !ct.IsCancellationRequested)
-            {
-                _logger.Warn($"VNDBデータ取得エラー: {ex.Message}");
-            }
-
-            return result;
-        }
-
-        private async Task<string> FindVndbIdByTitleAsync(
-            string gameName, CancellationToken ct)
-        {
-            var searchBody = $"{{\"filters\":[\"search\",\"=\",{EscapeJsonString(gameName)}]," +
-                $"\"fields\":\"title,alttitle\"," +
-                $"\"results\":5}}";
-
-            _logger.Info($"VNDB APIタイトル検索: {gameName}");
-
-            using (var content = new StringContent(searchBody, System.Text.Encoding.UTF8, "application/json"))
-            using (var response = await HttpClient.PostAsync(VndbApiEndpoint, content, ct))
-            {
-                if (!response.IsSuccessStatusCode)
-                    return null;
-
-                var json = await response.Content.ReadAsStringAsync();
-
-                // 各結果の id, title, alttitle を抽出して照合
-                var idMatches = Regex.Matches(json, @"""id""\s*:\s*""(v\d+)""");
-                var titleMatches = Regex.Matches(json, @"""title""\s*:\s*""((?:[^""\\]|\\.)*)""");
-                var alttitleMatches = Regex.Matches(json, @"""alttitle""\s*:\s*(?:""((?:[^""\\]|\\.)*)""|\bnull\b)");
-
-                var count = Math.Min(idMatches.Count, titleMatches.Count);
-                var normalizedGameName = NormalizeForComparison(gameName);
-
-                // 完全一致を優先検索（全角・半角を正規化して比較）
-                for (int i = 0; i < count; i++)
-                {
-                    var title = titleMatches[i].Groups[1].Value;
-                    var alttitle = i < alttitleMatches.Count ? alttitleMatches[i].Groups[1].Value : "";
-
-                    if (NormalizeForComparison(title) == normalizedGameName
-                        || (!string.IsNullOrEmpty(alttitle) && NormalizeForComparison(alttitle) == normalizedGameName))
-                    {
-                        var matchedId = idMatches[i].Groups[1].Value;
-                        _logger.Info($"VNDBタイトル一致: {title} ({matchedId})");
-                        return matchedId;
-                    }
-                }
-
-                _logger.Info($"VNDBタイトル一致なし: {gameName} (候補{count}件)");
-                return null;
-            }
-        }
-
-        public class VndbResult
-        {
-            public string Description { get; set; }
-            public string CoverImageUrl { get; set; }
-            public bool CoverIsPortrait { get; set; }
-            public List<string> ScreenshotUrls { get; set; } = new List<string>();
-        }
-
-        private static string EscapeJsonString(string value)
-        {
-            return "\"" + value
-                .Replace("\\", "\\\\")
-                .Replace("\"", "\\\"")
-                .Replace("\n", "\\n")
-                .Replace("\r", "\\r")
-                .Replace("\t", "\\t") + "\"";
-        }
-
         /// <summary>
-        /// 非ASCII文字を含む文字列を、SQL中で安全に構築するためのリテラル式を返す。
-        /// 2026-05のErogameScapeリニューアル後、pg_escape_string()が非ASCIIバイトを拒否するため、
-        /// UTF-8バイト列をhexエンコードして convert_from(decode(...)) でサーバ側復元する形に変換する。
+        /// タイトル比較用に全角英数字・記号・全角空白・波線記号を半角に正規化し、小文字化する。
+        /// 批評空間「アマカノ2」とVNDB「アマカノ２」、全角スペース「　」の差異を吸収する。
         /// </summary>
-        private static string BuildSqlJapaneseLiteral(string value)
-        {
-            var bytes = System.Text.Encoding.UTF8.GetBytes(value ?? string.Empty);
-            var hex = BitConverter.ToString(bytes).Replace("-", "").ToLowerInvariant();
-            return $"convert_from(decode('{hex}','hex'),'UTF8')";
-        }
-
-        /// <summary>
-        /// タイトル比較用に全角英数字・記号を半角に正規化し、小文字化する。
-        /// 批評空間「アマカノ2」とVNDB「アマカノ２」のような差異を吸収する。
-        /// </summary>
-        private static string NormalizeForComparison(string value)
+        public static string NormalizeForComparison(string value)
         {
             if (string.IsNullOrEmpty(value))
                 return "";
@@ -631,102 +559,49 @@ namespace ErogameScapeMetadata.Services
                 var c = chars[i];
                 // 全角英数字・記号（！-～, U+FF01-U+FF5E）を半角（!-~, U+0021-U+007E）に変換
                 if (c >= '\uFF01' && c <= '\uFF5E')
-                    chars[i] = (char)(c - 0xFEE0);
-            }
-
-            return new string(chars).ToLowerInvariant();
-        }
-
-        private async Task<List<Dictionary<string, string>>> ExecuteSqlAsync(
-            string sql, CancellationToken ct)
-        {
-            await RateLimitAsync(ct);
-
-            _logger.Info($"ErogameScape SQL: {sql}");
-
-            using (var content = new FormUrlEncodedContent(new[]
-            {
-                new KeyValuePair<string, string>("sql", sql)
-            }))
-            using (var response = await HttpClient.PostAsync(SqlEndpoint, content, ct))
-            {
-                response.EnsureSuccessStatusCode();
-
-                var html = await response.Content.ReadAsStringAsync();
-                return ParseHtmlTable(html);
-            }
-        }
-
-        private List<Dictionary<string, string>> ParseHtmlTable(string html)
-        {
-            var results = new List<Dictionary<string, string>>();
-
-            var doc = new HtmlDocument();
-            doc.LoadHtml(html);
-
-            var table = doc.DocumentNode.SelectSingleNode("//table");
-            if (table == null)
-                return results;
-
-            var headerRow = table.SelectSingleNode(".//tr");
-            if (headerRow == null)
-                return results;
-
-            var headers = headerRow.SelectNodes(".//th|.//td")
-                ?.Select(n => HtmlEntity.DeEntitize(n.InnerText).Trim())
-                .ToList();
-
-            if (headers == null || headers.Count == 0)
-                return results;
-
-            var dataRows = table.SelectNodes(".//tr");
-            if (dataRows == null)
-                return results;
-
-            foreach (var row in dataRows.Skip(1))
-            {
-                var cells = row.SelectNodes(".//td");
-                if (cells == null)
-                    continue;
-
-                var dict = new Dictionary<string, string>();
-                for (int i = 0; i < Math.Min(headers.Count, cells.Count); i++)
                 {
-                    var value = HtmlEntity.DeEntitize(cells[i].InnerText).Trim();
-                    dict[headers[i]] = value;
+                    chars[i] = (char)(c - 0xFEE0);
                 }
-
-                results.Add(dict);
+                // 全角スペース（U+3000）を半角スペースに変換
+                else if (c == '\u3000')
+                {
+                    chars[i] = ' ';
+                }
+                // 波線（WAVE DASH U+301C）を半角チルダに統一
+                else if (c == '\u301C')
+                {
+                    chars[i] = '~';
+                }
             }
 
-            return results;
+            var normalized = new string(chars).ToLowerInvariant();
+            // 連続する空白を1つの半角スペースに圧縮
+            return Regex.Replace(normalized, @"\s+", " ").Trim();
         }
 
-        private async Task RateLimitAsync(CancellationToken ct)
+        /// <summary>
+        /// 自動マッチングの第2パス用：[初回限定版]、(DL版)、【通常版】などの版数タグを除去して正規化する。
+        /// </summary>
+        public static string NormalizeAndStripSuffix(string value)
         {
-            TimeSpan delay;
-            lock (_rateLimitLock)
-            {
-                var elapsed = DateTime.UtcNow - _lastRequestTime;
-                var waitMs = elapsed.TotalMilliseconds < RateLimitMs
-                    ? RateLimitMs - (int)elapsed.TotalMilliseconds
-                    : 0;
-                delay = waitMs > 0 ? TimeSpan.FromMilliseconds(waitMs) : TimeSpan.Zero;
-                _lastRequestTime = DateTime.UtcNow + delay;
-            }
+            if (string.IsNullOrEmpty(value))
+                return "";
 
-            if (delay > TimeSpan.Zero)
-            {
-                await Task.Delay(delay, ct);
-            }
+            // 括弧内の版数・タグ（[...], (...), 【...】, （...）, ［...］）を除去
+            var stripped = Regex.Replace(value, @"\s*[\(\[\{【（［].*?[\)\]\}】）］]\s*", " ");
+            // 「 - Windows 10...」「 HD Remaster」等のよくある接尾辞を除去
+            stripped = Regex.Replace(stripped, @"\s*-\s*windows.*$", "", RegexOptions.IgnoreCase);
+            return NormalizeForComparison(stripped);
         }
 
-        private static DateTime? ParseDate(string value)
+        public static DateTime? ParseDate(string value)
         {
             if (string.IsNullOrEmpty(value))
                 return null;
 
-            if (DateTime.TryParseExact(value, "yyyy-MM-dd",
+            // VNDB は "yyyy-MM-dd"、"yyyy-MM"、"yyyy" の3形式がありうる
+            var formats = new[] { "yyyy-MM-dd", "yyyy-MM", "yyyy" };
+            if (DateTime.TryParseExact(value, formats,
                 CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
             {
                 if (date.Year >= TbaYearThreshold)
@@ -737,17 +612,13 @@ namespace ErogameScapeMetadata.Services
             return null;
         }
 
-        private static int? ParseInt(string value)
-        {
-            if (string.IsNullOrEmpty(value))
-                return null;
-            if (int.TryParse(value, out var result))
-                return result;
-            return null;
-        }
-
         public async Task<byte[]> DownloadImageAsync(string url, CancellationToken ct = default)
         {
+            if (_nocoDb != null && _nocoDb.IsNocoDbUrl(url))
+            {
+                return await _nocoDb.DownloadImageAsync(url, ct);
+            }
+
             try
             {
                 using (var response = await HttpClient.GetAsync(url, ct))
@@ -762,8 +633,6 @@ namespace ErogameScapeMetadata.Services
                     return await response.Content.ReadAsByteArrayAsync();
                 }
             }
-            // HttpClientのタイムアウトもTaskCanceledExceptionを投げるため、
-            // 実際にキャンセル要求があった場合のみ伝播させる
             catch (Exception ex) when (!(ex is OperationCanceledException) || !ct.IsCancellationRequested)
             {
                 _logger.Warn($"画像ダウンロードエラー ({url}): {ex.Message}");
@@ -771,7 +640,7 @@ namespace ErogameScapeMetadata.Services
             }
         }
 
-        private static string EscapeEucJp(string value)
+        internal static string EscapeEucJp(string value)
         {
             var bytes = System.Text.Encoding.GetEncoding("EUC-JP").GetBytes(value);
             var sb = new System.Text.StringBuilder();
@@ -788,20 +657,6 @@ namespace ErogameScapeMetadata.Services
                 }
             }
             return sb.ToString();
-        }
-
-        private static string NullIfEmpty(string value)
-        {
-            return string.IsNullOrEmpty(value) ? null : value;
-        }
-    }
-
-    internal static class DictionaryExtensions
-    {
-        public static string GetValueOrDefault(
-            this Dictionary<string, string> dict, string key)
-        {
-            return dict.TryGetValue(key, out var value) ? value : null;
         }
     }
 }

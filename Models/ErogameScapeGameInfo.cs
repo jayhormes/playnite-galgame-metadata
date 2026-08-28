@@ -11,61 +11,92 @@ namespace ErogameScapeMetadata.Models
         private const string DmmCoverUrlTemplate =
             "https://pics.dmm.co.jp/digital/pcgame/{0}/{0}pl.jpg";
 
-        public int Id { get; set; }
+        // 2.0.0: 主キーは VNDB id。EGS id は release extlinks から解決（無い作品もある）
+        public string VndbId { get; set; }
+        public int? EgsId { get; set; }
+
         public string GameName { get; set; }
-        public string Furigana { get; set; }
+        public string AltName { get; set; }
         public string BrandName { get; set; }
-        public string BrandUrl { get; set; }
         public DateTime? SellDay { get; set; }
+
+        // EGS スコア（Wayback/Tavily 経由）。EgsSource = "wayback"（快照時点値）/ "tavily"（live）
         public int? Median { get; set; }
-        public int? Average { get; set; }
         public int? ReviewCount { get; set; }
+        public string EgsSource { get; set; }
+        public string EgsSnapshotDate { get; set; }
+
+        public double? VndbRating { get; set; }
+        public int? MinAge { get; set; }
+
         public string DmmId { get; set; }
-        public string DmmSubsc { get; set; }
-        public string OfficialGenre { get; set; }
-        public string Shoukai { get; set; }
         public string DlsiteId { get; set; }
         public string DlsiteDomain { get; set; }
+        public string GetchuId { get; set; }
         public string Description { get; set; }
-        public bool IsEroge { get; set; }
-        public string SeriesName { get; set; }
         public List<string> Tags { get; set; } = new List<string>();
         public List<string> Genres { get; set; } = new List<string>();
-        public List<string> Features { get; set; } = new List<string>();
         public List<string> BackgroundImageUrls { get; set; } = new List<string>();
+        public string NocoDbCoverImageUrl { get; set; }
         public string VndbCoverImageUrl { get; set; }
         public bool VndbCoverIsPortrait { get; set; }
 
-        public string GetCoverImageUrl()
+        public List<string> GetCoverImageCandidates()
         {
+            var candidates = new List<string>();
             var dmmUrl = GetDmmCoverUrl();
 
-            // VNDBカバーが縦長なら最優先
-            if (!string.IsNullOrEmpty(VndbCoverImageUrl) && VndbCoverIsPortrait)
-                return VndbCoverImageUrl;
+            // 0. NocoDB のカバー画像があれば最優先
+            if (!string.IsNullOrEmpty(NocoDbCoverImageUrl))
+            {
+                candidates.Add(NocoDbCoverImageUrl);
+            }
 
-            // DMMパッケージ画像があればそちらを試す
-            if (dmmUrl != null)
-                return dmmUrl;
+            // 1. VNDBカバーが縦長なら次点優先
+            if (!string.IsNullOrEmpty(VndbCoverImageUrl) && VndbCoverIsPortrait && !candidates.Contains(VndbCoverImageUrl))
+            {
+                candidates.Add(VndbCoverImageUrl);
+            }
 
-            // VNDBカバー（横長でも他に選択肢がない場合）
-            if (!string.IsNullOrEmpty(VndbCoverImageUrl))
-                return VndbCoverImageUrl;
+            // 2. DMMパッケージ画像があれば追加
+            if (!string.IsNullOrEmpty(dmmUrl) && !candidates.Contains(dmmUrl))
+            {
+                candidates.Add(dmmUrl);
+            }
 
-            return null;
+            // 3. VNDBカバー（横長、または次点フォールバックとして追加）
+            if (!string.IsNullOrEmpty(VndbCoverImageUrl) && !candidates.Contains(VndbCoverImageUrl))
+            {
+                candidates.Add(VndbCoverImageUrl);
+            }
+
+            return candidates;
         }
 
-        private string GetDmmCoverUrl()
+        public string GetCoverImageUrl()
         {
-            var dmm = DmmSubsc ?? DmmId;
-            if (string.IsNullOrEmpty(dmm))
+            var candidates = GetCoverImageCandidates();
+            return candidates.Count > 0 ? candidates[0] : null;
+        }
+
+        public string GetDmmCoverUrl()
+        {
+            if (string.IsNullOrEmpty(DmmId))
                 return null;
-            return string.Format(DmmCoverUrlTemplate, dmm);
+            return string.Format(DmmCoverUrlTemplate, DmmId);
         }
 
         public string GetErogameScapeUrl()
         {
-            return string.Format(ErogameScapeGameUrlTemplate, Id);
+            return EgsId.HasValue
+                ? string.Format(ErogameScapeGameUrlTemplate, EgsId.Value)
+                : null;
+        }
+
+        public string GetVndbUrl()
+        {
+            return string.IsNullOrEmpty(VndbId) ? null : $"https://vndb.org/{VndbId}";
         }
     }
 }
+

@@ -1,5 +1,15 @@
 AddonId: ErogameScapeMetadata_b8e3f2a1-5c4d-4e6f-9a1b-2d3e4f5a6b7c
 Packages:
+  - Version: 2.0.0
+    RequiredApiVersion: 6.11.0
+    ReleaseDate: 2026-08-28
+    PackageUrl: https://github.com/jayhormes/playnite-galgame-metadata/releases/download/v2.0.0/ErogameScapeMetadata.pext
+    Changelog:
+      - Never contacts ErogameScape servers directly (site blocks unapproved IPs)
+      - Search now uses VNDB; EGS id resolved from VNDB release extlinks
+      - EGS scores fetched via Wayback Machine snapshots, optional Tavily Extract fallback for live values
+      - Community score falls back to VNDB rating when EGS data is unavailable
+      - Tags now sourced from VNDB (content tags); Series/Features fields removed
   - Version: 1.0.2
     RequiredApiVersion: 6.11.0
     ReleaseDate: 2026-07-21

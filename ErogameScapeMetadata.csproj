@@ -6,9 +6,9 @@
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <AssemblyName>ErogameScapeMetadata</AssemblyName>
     <RootNamespace>ErogameScapeMetadata</RootNamespace>
-    <Version>1.0.0</Version>
-    <Authors>minuspiral</Authors>
-    <Description>Playnite metadata plugin for ErogameScape (批評空間)</Description>
+    <Version>2.0.0</Version>
+    <Authors>minuspiral, jayhormes</Authors>
+    <Description>Unified Galgame &amp; Visual Novel metadata provider for Playnite (NocoDB, VNDB, ErogameScape, DLsite, DMM)</Description>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="PlayniteSDK" Version="6.11.0">
@@ -24,5 +24,10 @@
     <None Update="icon.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+  </ItemGroup>
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>ErogameScapeMetadata.Tests</_Parameter1>
+    </AssemblyAttribute>
   </ItemGroup>
 </Project>

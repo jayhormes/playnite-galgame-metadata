@@ -1,8 +1,11 @@
+using ErogameScapeMetadata.Models;
 using ErogameScapeMetadata.Services;
 using Playnite.SDK;
+using Playnite.SDK.Data;
 using Playnite.SDK.Plugins;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Windows.Controls;
 
 namespace ErogameScapeMetadata
@@ -31,18 +34,38 @@ namespace ErogameScapeMetadata
             MetadataField.Genres,
             MetadataField.Platform,
             MetadataField.AgeRating,
-            MetadataField.Series,
-            MetadataField.Features,
             MetadataField.Region,
         };
 
         public ErogameScapeMetadataPlugin(IPlayniteAPI api) : base(api)
         {
-            _apiClient = new ErogameScapeApiClient(_logger);
+            _apiClient = new ErogameScapeApiClient(_logger, LoadConfig());
             Properties = new MetadataPluginProperties
             {
                 HasSettings = false
             };
+        }
+
+        // 設定は ExtensionsData/<plugin id>/config.json（UI なし、手動編集して Playnite 再起動）
+        private PluginConfig LoadConfig()
+        {
+            var path = Path.Combine(GetPluginUserDataPath(), "config.json");
+            try
+            {
+                if (File.Exists(path))
+                {
+                    return Serialization.FromJson<PluginConfig>(File.ReadAllText(path)) ?? new PluginConfig();
+                }
+                var config = new PluginConfig();
+                Directory.CreateDirectory(GetPluginUserDataPath());
+                File.WriteAllText(path, Serialization.ToJson(config, true));
+                return config;
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn($"config.json 読み込み失敗、既定値を使用: {ex.Message}");
+                return new PluginConfig();
+            }
         }
 
         public override OnDemandMetadataProvider GetMetadataProvider(MetadataRequestOptions options)
