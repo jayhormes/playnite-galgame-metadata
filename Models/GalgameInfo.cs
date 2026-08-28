@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
 
-namespace ErogameScapeMetadata.Models
+namespace GalgameMetadata.Models
 {
-    public class ErogameScapeGameInfo
+    public class GalgameInfo
     {
         private const string ErogameScapeGameUrlTemplate =
             "https://erogamescape.dyndns.org/~ap2/ero/toukei_kaiseki/game.php?game={0}";

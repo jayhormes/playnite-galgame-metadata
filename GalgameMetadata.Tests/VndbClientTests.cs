@@ -1,8 +1,8 @@
-using ErogameScapeMetadata.Services;
+using GalgameMetadata.Services;
 using System.Collections.Generic;
 using Xunit;
 
-namespace ErogameScapeMetadata.Tests
+namespace GalgameMetadata.Tests
 {
     public class VndbClientTests
     {

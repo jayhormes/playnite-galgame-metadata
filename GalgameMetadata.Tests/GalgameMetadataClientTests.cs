@@ -1,13 +1,13 @@
-using ErogameScapeMetadata.Models;
-using ErogameScapeMetadata.Services;
+using GalgameMetadata.Models;
+using GalgameMetadata.Services;
 using HtmlAgilityPack;
 using System;
 using System.Collections.Generic;
 using Xunit;
 
-namespace ErogameScapeMetadata.Tests
+namespace GalgameMetadata.Tests
 {
-    public class ErogameScapeApiClientTests
+    public class GalgameMetadataClientTests
     {
         [Theory]
         [InlineData("アマカノ２", "アマカノ2")]
@@ -19,7 +19,7 @@ namespace ErogameScapeMetadata.Tests
         [InlineData("  Fate  /  stay   night  ", "fate / stay night")]
         public void NormalizeForComparison_NormalizesCorrectly(string input, string expected)
         {
-            var actual = ErogameScapeApiClient.NormalizeForComparison(input);
+            var actual = GalgameMetadataClient.NormalizeForComparison(input);
             Assert.Equal(expected, actual);
         }
 
@@ -31,14 +31,14 @@ namespace ErogameScapeMetadata.Tests
         [InlineData("サノバウィッチ（通常版）", "サノバウィッチ")]
         public void NormalizeAndStripSuffix_StripsBracketsAndTags(string input, string expected)
         {
-            var actual = ErogameScapeApiClient.NormalizeAndStripSuffix(input);
+            var actual = GalgameMetadataClient.NormalizeAndStripSuffix(input);
             Assert.Equal(expected, actual);
         }
 
         [Fact]
         public void ParseDate_WithFullDate_ReturnsCorrectDateTime()
         {
-            var date = ErogameScapeApiClient.ParseDate("2024-05-31");
+            var date = GalgameMetadataClient.ParseDate("2024-05-31");
             Assert.NotNull(date);
             Assert.Equal(new DateTime(2024, 5, 31), date.Value);
         }
@@ -46,7 +46,7 @@ namespace ErogameScapeMetadata.Tests
         [Fact]
         public void ParseDate_WithYearMonth_ReturnsFirstDayOfMonth()
         {
-            var date = ErogameScapeApiClient.ParseDate("2024-05");
+            var date = GalgameMetadataClient.ParseDate("2024-05");
             Assert.NotNull(date);
             Assert.Equal(new DateTime(2024, 5, 1), date.Value);
         }
@@ -54,7 +54,7 @@ namespace ErogameScapeMetadata.Tests
         [Fact]
         public void ParseDate_WithYearOnly_ReturnsFirstDayOfYear()
         {
-            var date = ErogameScapeApiClient.ParseDate("2024");
+            var date = GalgameMetadataClient.ParseDate("2024");
             Assert.NotNull(date);
             Assert.Equal(new DateTime(2024, 1, 1), date.Value);
         }
@@ -68,15 +68,15 @@ namespace ErogameScapeMetadata.Tests
         [InlineData("invalid-date")]
         public void ParseDate_WithInvalidOrFutureTba_ReturnsNull(string input)
         {
-            var date = ErogameScapeApiClient.ParseDate(input);
+            var date = GalgameMetadataClient.ParseDate(input);
             Assert.Null(date);
         }
 
         [Fact]
         public void ApplyExtLinks_ResolvesEgsId_FromVariousUrlPatterns()
         {
-            var client = new ErogameScapeApiClient(null, null);
-            var game = new ErogameScapeGameInfo();
+            var client = new GalgameMetadataClient(null, null);
+            var game = new GalgameInfo();
 
             var releases = new List<VndbRelease>
             {
@@ -97,8 +97,8 @@ namespace ErogameScapeMetadata.Tests
         [Fact]
         public void ApplyExtLinks_ResolvesDlsiteProAndManiax()
         {
-            var client = new ErogameScapeApiClient(null, null);
-            var game = new ErogameScapeGameInfo();
+            var client = new GalgameMetadataClient(null, null);
+            var game = new GalgameInfo();
 
             var releases = new List<VndbRelease>
             {
@@ -120,8 +120,8 @@ namespace ErogameScapeMetadata.Tests
         [Fact]
         public void ApplyExtLinks_ResolvesDmmCidAndStandardUrls()
         {
-            var client = new ErogameScapeApiClient(null, null);
-            var game = new ErogameScapeGameInfo();
+            var client = new GalgameMetadataClient(null, null);
+            var game = new GalgameInfo();
 
             var releases = new List<VndbRelease>
             {
@@ -142,8 +142,8 @@ namespace ErogameScapeMetadata.Tests
         [Fact]
         public void ApplyExtLinks_ResolvesGetchuIdDirectly()
         {
-            var client = new ErogameScapeApiClient(null, null);
-            var game = new ErogameScapeGameInfo();
+            var client = new GalgameMetadataClient(null, null);
+            var game = new GalgameInfo();
 
             var releases = new List<VndbRelease>
             {
@@ -164,8 +164,8 @@ namespace ErogameScapeMetadata.Tests
         [Fact]
         public void ApplyExtLinks_CalculatesMaxMinAgeFromReleases()
         {
-            var client = new ErogameScapeApiClient(null, null);
-            var game = new ErogameScapeGameInfo();
+            var client = new GalgameMetadataClient(null, null);
+            var game = new GalgameInfo();
 
             var releases = new List<VndbRelease>
             {
@@ -182,7 +182,7 @@ namespace ErogameScapeMetadata.Tests
         [Fact]
         public void ApplyVndbImages_FiltersUnsafeAndAssignsPortrait()
         {
-            var game = new ErogameScapeGameInfo();
+            var game = new GalgameInfo();
             var vn = new VndbVn
             {
                 Image = new VndbImage
@@ -199,7 +199,7 @@ namespace ErogameScapeMetadata.Tests
                 }
             };
 
-            ErogameScapeApiClient.ApplyVndbImages(game, vn);
+            GalgameMetadataClient.ApplyVndbImages(game, vn);
 
             Assert.Equal("https://t.vndb.org/cv/123.jpg", game.VndbCoverImageUrl);
             Assert.True(game.VndbCoverIsPortrait);
@@ -210,7 +210,7 @@ namespace ErogameScapeMetadata.Tests
         [Fact]
         public void ApplyVndbTags_FiltersByCategoryAndSpoiler()
         {
-            var game = new ErogameScapeGameInfo();
+            var game = new GalgameInfo();
             var vn = new VndbVn
             {
                 Tags = new List<VndbTag>
@@ -223,7 +223,7 @@ namespace ErogameScapeMetadata.Tests
                 }
             };
 
-            ErogameScapeApiClient.ApplyVndbTags(game, vn);
+            GalgameMetadataClient.ApplyVndbTags(game, vn);
 
             Assert.Equal(2, game.Tags.Count);
             Assert.Equal("Romance", game.Tags[0]);
@@ -234,7 +234,7 @@ namespace ErogameScapeMetadata.Tests
         public void ExtractJsonString_DecodesJsonEscapesAndUnicode()
         {
             var json = "{\"intro_s\":\"Line 1\\nLine 2\\t\\\"Quoted\\\" \\u3042\\u3044\\u3046\"}";
-            var value = ErogameScapeApiClient.ExtractJsonString(json, "intro_s");
+            var value = GalgameMetadataClient.ExtractJsonString(json, "intro_s");
 
             Assert.Equal("Line 1\nLine 2\t\"Quoted\" あいう", value);
         }
@@ -253,7 +253,7 @@ namespace ErogameScapeMetadata.Tests
             var doc = new HtmlDocument();
             doc.LoadHtml(html);
 
-            var story = ErogameScapeApiClient.ExtractGetchuSection(doc, "ストーリー");
+            var story = GalgameMetadataClient.ExtractGetchuSection(doc, "ストーリー");
 
             Assert.NotNull(story);
             Assert.Contains("主人公はある日、不思議な少女に出会う。", story);
@@ -263,7 +263,7 @@ namespace ErogameScapeMetadata.Tests
         [Fact]
         public void EscapeEucJp_EncodesJapaneseCharacters()
         {
-            var encoded = ErogameScapeApiClient.EscapeEucJp("アマカノ");
+            var encoded = GalgameMetadataClient.EscapeEucJp("アマカノ");
             // EUC-JP bytes for "アマカノ": %A5%A2%A5%DE%A5%AB%A5%CE
             Assert.Equal("%A5%A2%A5%DE%A5%AB%A5%CE", encoded);
         }

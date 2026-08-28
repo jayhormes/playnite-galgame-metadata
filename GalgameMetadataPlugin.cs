@@ -1,5 +1,5 @@
-using ErogameScapeMetadata.Models;
-using ErogameScapeMetadata.Services;
+using GalgameMetadata.Models;
+using GalgameMetadata.Services;
 using Playnite.SDK;
 using Playnite.SDK.Data;
 using Playnite.SDK.Plugins;
@@ -8,17 +8,17 @@ using System.Collections.Generic;
 using System.IO;
 using System.Windows.Controls;
 
-namespace ErogameScapeMetadata
+namespace GalgameMetadata
 {
-    public class ErogameScapeMetadataPlugin : MetadataPlugin
+    public class GalgameMetadataPlugin : MetadataPlugin
     {
         private static readonly ILogger _logger = LogManager.GetLogger();
-        private readonly ErogameScapeApiClient _apiClient;
+        private readonly GalgameMetadataClient _apiClient;
 
-        public override Guid Id { get; } = Guid.Parse("b8e3f2a1-5c4d-4e6f-9a1b-2d3e4f5a6b7c");
+        public override Guid Id { get; } = Guid.Parse("e6ab0c61-8c40-4e4b-842b-08cd132c09e4");
 
         // NocoDB / VNDB / EGS / DLsite / DMM を束ねるため、UI 上の表示名は総称にする
-        public override string Name => "Galgame (NocoDB/VNDB)";
+        public override string Name => "Galgame Metadata";
 
         public override List<MetadataField> SupportedFields { get; } = new List<MetadataField>
         {
@@ -38,9 +38,9 @@ namespace ErogameScapeMetadata
             MetadataField.Region,
         };
 
-        public ErogameScapeMetadataPlugin(IPlayniteAPI api) : base(api)
+        public GalgameMetadataPlugin(IPlayniteAPI api) : base(api)
         {
-            _apiClient = new ErogameScapeApiClient(_logger, LoadConfig());
+            _apiClient = new GalgameMetadataClient(_logger, LoadConfig());
             Properties = new MetadataPluginProperties
             {
                 HasSettings = false
@@ -71,7 +71,7 @@ namespace ErogameScapeMetadata
 
         public override OnDemandMetadataProvider GetMetadataProvider(MetadataRequestOptions options)
         {
-            return new ErogameScapeMetadataProvider(options, _apiClient);
+            return new GalgameMetadataProvider(options, _apiClient);
         }
 
         public override ISettings GetSettings(bool firstRunSettings)

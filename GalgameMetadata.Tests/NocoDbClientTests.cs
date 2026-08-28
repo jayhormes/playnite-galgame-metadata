@@ -1,11 +1,11 @@
-using ErogameScapeMetadata.Services;
+using GalgameMetadata.Services;
 using Playnite.SDK.Data;
 using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using Xunit;
 
-namespace ErogameScapeMetadata.Tests
+namespace GalgameMetadata.Tests
 {
     public class NocoDbClientTests : SerializationTestBase
     {

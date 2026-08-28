@@ -22,6 +22,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\ErogameScapeMetadata.csproj" />
+    <ProjectReference Include="..\GalgameMetadata.csproj" />
   </ItemGroup>
 </Project>

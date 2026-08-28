@@ -1,7 +1,7 @@
-using ErogameScapeMetadata.Services;
+using GalgameMetadata.Services;
 using Xunit;
 
-namespace ErogameScapeMetadata.Tests
+namespace GalgameMetadata.Tests
 {
     public class EgsStatsClientTests
     {

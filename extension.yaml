@@ -1,8 +1,8 @@
-Id: ErogameScapeMetadata_b8e3f2a1-5c4d-4e6f-9a1b-2d3e4f5a6b7c
-Name: ErogameScape Metadata
-Author: minuspiral (Wayback/Tavily fork by jayhormes)
+Id: GalgameMetadata_e6ab0c61-8c40-4e4b-842b-08cd132c09e4
+Name: Galgame Metadata
+Author: jayhormes (forked from minuspiral)
 Version: 2.0.0
-Module: ErogameScapeMetadata.dll
+Module: GalgameMetadata.dll
 Type: MetadataProvider
 Icon: icon.png
 Links:

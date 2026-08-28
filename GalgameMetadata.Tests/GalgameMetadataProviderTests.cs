@@ -1,4 +1,4 @@
-using ErogameScapeMetadata.Models;
+using GalgameMetadata.Models;
 using Playnite.SDK;
 using Playnite.SDK.Models;
 using Playnite.SDK.Plugins;
@@ -8,19 +8,19 @@ using System.Linq;
 using System.Reflection;
 using Xunit;
 
-namespace ErogameScapeMetadata.Tests
+namespace GalgameMetadata.Tests
 {
-    public class ErogameScapeMetadataProviderTests
+    public class GalgameMetadataProviderTests
     {
-        private ErogameScapeMetadataProvider CreateProviderWithGame(ErogameScapeGameInfo game)
+        private GalgameMetadataProvider CreateProviderWithGame(GalgameInfo game)
         {
             var options = new MetadataRequestOptions(new Game("Test Game"), false);
-            var provider = new ErogameScapeMetadataProvider(options, null);
+            var provider = new GalgameMetadataProvider(options, null);
 
             // リフレクション経由で内部の _matchedGame と _searchCompleted を設定
-            var matchedField = typeof(ErogameScapeMetadataProvider)
+            var matchedField = typeof(GalgameMetadataProvider)
                 .GetField("_matchedGame", BindingFlags.NonPublic | BindingFlags.Instance);
-            var searchCompletedField = typeof(ErogameScapeMetadataProvider)
+            var searchCompletedField = typeof(GalgameMetadataProvider)
                 .GetField("_searchCompleted", BindingFlags.NonPublic | BindingFlags.Instance);
 
             matchedField.SetValue(provider, game);
@@ -32,7 +32,7 @@ namespace ErogameScapeMetadata.Tests
         [Fact]
         public void GetCommunityScore_WithValidEgsScore_ReturnsEgsMedian()
         {
-            var game = new ErogameScapeGameInfo
+            var game = new GalgameInfo
             {
                 Median = 85,
                 ReviewCount = 100,
@@ -48,7 +48,7 @@ namespace ErogameScapeMetadata.Tests
         [Fact]
         public void GetCommunityScore_WithZeroEgsScore_FallsBackToVndbRating()
         {
-            var game = new ErogameScapeGameInfo
+            var game = new GalgameInfo
             {
                 Median = 0,
                 ReviewCount = 0,
@@ -64,7 +64,7 @@ namespace ErogameScapeMetadata.Tests
         [Fact]
         public void GetCommunityScore_WithoutEgsScore_FallsBackToVndbRating()
         {
-            var game = new ErogameScapeGameInfo
+            var game = new GalgameInfo
             {
                 Median = null,
                 ReviewCount = null,
@@ -80,7 +80,7 @@ namespace ErogameScapeMetadata.Tests
         [Fact]
         public void GetReleaseDate_ReturnsCorrectPlayniteReleaseDate()
         {
-            var game = new ErogameScapeGameInfo
+            var game = new GalgameInfo
             {
                 SellDay = new DateTime(2024, 7, 26)
             };
@@ -100,7 +100,7 @@ namespace ErogameScapeMetadata.Tests
         [InlineData(0, "全年齢")]
         public void GetAgeRatings_MapsCorrectly(int minAge, string expectedRating)
         {
-            var game = new ErogameScapeGameInfo { MinAge = minAge };
+            var game = new GalgameInfo { MinAge = minAge };
             var provider = CreateProviderWithGame(game);
 
             var ratings = provider.GetAgeRatings(new GetMetadataFieldArgs())?.ToList();
@@ -113,7 +113,7 @@ namespace ErogameScapeMetadata.Tests
         [Fact]
         public void GetDevelopersAndPublishers_ReturnsBrandName()
         {
-            var game = new ErogameScapeGameInfo { BrandName = "あざらしそふと" };
+            var game = new GalgameInfo { BrandName = "あざらしそふと" };
             var provider = CreateProviderWithGame(game);
 
             var developers = provider.GetDevelopers(new GetMetadataFieldArgs())?.ToList();
@@ -128,7 +128,7 @@ namespace ErogameScapeMetadata.Tests
         [Fact]
         public void GetLinks_GeneratesAllAvailableLinks()
         {
-            var game = new ErogameScapeGameInfo
+            var game = new GalgameInfo
             {
                 EgsId = 1234,
                 VndbId = "v5678",
@@ -151,7 +151,7 @@ namespace ErogameScapeMetadata.Tests
         [Fact]
         public void GetTagsAndGenres_ReturnsMappedProperties()
         {
-            var game = new ErogameScapeGameInfo
+            var game = new GalgameInfo
             {
                 Tags = new List<string> { "純愛", "学園" },
                 Genres = new List<string> { "ADV", "ビジュアルノベル" }

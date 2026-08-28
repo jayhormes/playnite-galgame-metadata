@@ -5,7 +5,7 @@ using System;
 using System.IO;
 using System.Reflection;
 
-namespace ErogameScapeMetadata.Tests
+namespace GalgameMetadata.Tests
 {
     /// <summary>
     /// Playnite.SDK.Data.Serialization は Playnite 本体が起動時に注入する

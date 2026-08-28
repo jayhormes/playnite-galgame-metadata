@@ -1,4 +1,4 @@
-using ErogameScapeMetadata.Models;
+using GalgameMetadata.Models;
 using HtmlAgilityPack;
 using Playnite.SDK;
 using System;
@@ -10,14 +10,14 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace ErogameScapeMetadata.Services
+namespace GalgameMetadata.Services
 {
     // 2.0.0 リファクタ：EGS 本体（SQL API 含む）へは一切アクセスしない。
     //   検索         → VNDB kana API
     //   EGS id 解決  → VNDB release extlinks（DLsite/DMM id も同時に取得）
     //   EGS スコア   → Wayback 快照 → Tavily Extract（EgsStatsClient）
     //   補完         → DLsite API / Getchu / VNDB（従来どおり、これらは EGS ではない）
-    public class ErogameScapeApiClient
+    public class GalgameMetadataClient
     {
         private static readonly HttpClient HttpClient;
 
@@ -32,7 +32,7 @@ namespace ErogameScapeMetadata.Services
         private readonly bool _useNocoDbScores;
         private readonly int _nocoDbMaxTags;
 
-        static ErogameScapeApiClient()
+        static GalgameMetadataClient()
         {
             HttpClient = new HttpClient();
             HttpClient.DefaultRequestHeaders.UserAgent.ParseAdd(
@@ -40,7 +40,7 @@ namespace ErogameScapeMetadata.Services
             HttpClient.Timeout = TimeSpan.FromSeconds(30);
         }
 
-        public ErogameScapeApiClient(ILogger logger, PluginConfig config)
+        public GalgameMetadataClient(ILogger logger, PluginConfig config)
         {
             _logger = logger;
             _vndb = new VndbClient(HttpClient, logger);
@@ -55,11 +55,11 @@ namespace ErogameScapeMetadata.Services
             _nocoDbMaxTags = config?.NocoDbMaxTags ?? PluginConfig.DefaultNocoDbMaxTags;
         }
 
-        public async Task<List<ErogameScapeGameInfo>> SearchGamesAsync(
+        public async Task<List<GalgameInfo>> SearchGamesAsync(
             string keyword, CancellationToken ct = default)
         {
             var vns = await _vndb.SearchAsync(keyword, ct);
-            return vns.Select(v => new ErogameScapeGameInfo
+            return vns.Select(v => new GalgameInfo
             {
                 VndbId = v.Id,
                 GameName = v.DisplayName,
@@ -69,8 +69,8 @@ namespace ErogameScapeMetadata.Services
             }).ToList();
         }
 
-        public async Task<ErogameScapeGameInfo> GetGameDetailsAsync(
-            ErogameScapeGameInfo stub, CancellationToken ct = default)
+        public async Task<GalgameInfo> GetGameDetailsAsync(
+            GalgameInfo stub, CancellationToken ct = default)
         {
             if (stub?.VndbId == null)
                 return null;
@@ -84,7 +84,7 @@ namespace ErogameScapeMetadata.Services
             if (vn == null)
                 return null;
 
-            var game = new ErogameScapeGameInfo
+            var game = new GalgameInfo
             {
                 VndbId = vn.Id,
                 GameName = vn.DisplayName,
@@ -143,7 +143,7 @@ namespace ErogameScapeMetadata.Services
         /// <summary>
         /// NocoDB（自建庫）の値を優先適用する。HTTP を伴わない純粋なマージ処理。
         /// </summary>
-        internal void ApplyNocoDbData(ErogameScapeGameInfo game, NocoDbGameData noco)
+        internal void ApplyNocoDbData(GalgameInfo game, NocoDbGameData noco)
         {
             if (game == null || noco == null)
                 return;
@@ -219,7 +219,7 @@ namespace ErogameScapeMetadata.Services
             return merged;
         }
 
-        internal void ApplyExtLinks(ErogameScapeGameInfo game, List<VndbRelease> releases)
+        internal void ApplyExtLinks(GalgameInfo game, List<VndbRelease> releases)
         {
             if (releases == null)
                 return;
@@ -287,7 +287,7 @@ namespace ErogameScapeMetadata.Services
             }
         }
 
-        internal static void ApplyVndbImages(ErogameScapeGameInfo game, VndbVn vn)
+        internal static void ApplyVndbImages(GalgameInfo game, VndbVn vn)
         {
             if (vn.Image != null && vn.Image.IsSafe && !string.IsNullOrEmpty(vn.Image.Url))
             {
@@ -307,7 +307,7 @@ namespace ErogameScapeMetadata.Services
             }
         }
 
-        internal static void ApplyVndbTags(ErogameScapeGameInfo game, VndbVn vn)
+        internal static void ApplyVndbTags(GalgameInfo game, VndbVn vn)
         {
             if (vn.Tags == null)
                 return;
@@ -327,7 +327,7 @@ namespace ErogameScapeMetadata.Services
         }
 
         public async Task EnrichFromDlsiteAsync(
-            ErogameScapeGameInfo game, CancellationToken ct = default)
+            GalgameInfo game, CancellationToken ct = default)
         {
             if (string.IsNullOrEmpty(game.DlsiteId))
                 return;
@@ -382,7 +382,7 @@ namespace ErogameScapeMetadata.Services
         }
 
         public async Task EnrichDescriptionFromGetchuAsync(
-            ErogameScapeGameInfo game, CancellationToken ct = default)
+            GalgameInfo game, CancellationToken ct = default)
         {
             // 1. VNDB extlinks から既に Getchu ID が解決されている場合は直接あらすじを取得（検索不要）
             if (!string.IsNullOrEmpty(game.GetchuId))

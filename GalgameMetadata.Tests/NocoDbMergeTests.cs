@@ -1,18 +1,18 @@
-using ErogameScapeMetadata.Models;
-using ErogameScapeMetadata.Services;
+using GalgameMetadata.Models;
+using GalgameMetadata.Services;
 using System;
 using System.Collections.Generic;
 using Xunit;
 
-namespace ErogameScapeMetadata.Tests
+namespace GalgameMetadata.Tests
 {
     // NocoDB（自建庫）の値を VNDB 由来のデータへ被せるマージ規則。HTTP を伴わない。
     public class NocoDbMergeTests
     {
-        private static ErogameScapeApiClient Client(
+        private static GalgameMetadataClient Client(
             bool preferNocoTags = true, bool useNocoScores = true, int maxTags = 30)
         {
-            return new ErogameScapeApiClient(null, new PluginConfig
+            return new GalgameMetadataClient(null, new PluginConfig
             {
                 PreferNocoDbTags = preferNocoTags,
                 FallbackNocoDbScores = useNocoScores,
@@ -20,9 +20,9 @@ namespace ErogameScapeMetadata.Tests
             });
         }
 
-        private static ErogameScapeGameInfo VndbGame()
+        private static GalgameInfo VndbGame()
         {
-            return new ErogameScapeGameInfo
+            return new GalgameInfo
             {
                 VndbId = "v63318",
                 GameName = "モザイクの天使",
@@ -177,7 +177,7 @@ namespace ErogameScapeMetadata.Tests
         [Fact]
         public void MergeTags_DeduplicatesAcrossSources()
         {
-            var merged = ErogameScapeApiClient.MergeTags(
+            var merged = GalgameMetadataClient.MergeTags(
                 new List<string> { "共通", "NocoOnly" },
                 new List<string> { "共通", "VndbOnly" },
                 preferNoco: false,
@@ -195,7 +195,7 @@ namespace ErogameScapeMetadata.Tests
                 noco.Add($"tag{i}");
             }
 
-            var merged = ErogameScapeApiClient.MergeTags(noco, new List<string>(), true, 30);
+            var merged = GalgameMetadataClient.MergeTags(noco, new List<string>(), true, 30);
 
             Assert.Equal(30, merged.Count);
             Assert.Equal("tag0", merged[0]);
@@ -211,7 +211,7 @@ namespace ErogameScapeMetadata.Tests
                 noco.Add($"tag{i}");
             }
 
-            var merged = ErogameScapeApiClient.MergeTags(noco, new List<string>(), true, 0);
+            var merged = GalgameMetadataClient.MergeTags(noco, new List<string>(), true, 0);
 
             Assert.Equal(40, merged.Count);
         }
@@ -219,9 +219,9 @@ namespace ErogameScapeMetadata.Tests
         [Fact]
         public void MergeTags_NullInputsAreSafe()
         {
-            Assert.Empty(ErogameScapeApiClient.MergeTags(null, null, true, 30));
-            Assert.Equal(new[] { "a" }, ErogameScapeApiClient.MergeTags(null, new List<string> { "a" }, true, 30));
-            Assert.Equal(new[] { "b" }, ErogameScapeApiClient.MergeTags(new List<string> { "b" }, null, true, 30));
+            Assert.Empty(GalgameMetadataClient.MergeTags(null, null, true, 30));
+            Assert.Equal(new[] { "a" }, GalgameMetadataClient.MergeTags(null, new List<string> { "a" }, true, 30));
+            Assert.Equal(new[] { "b" }, GalgameMetadataClient.MergeTags(new List<string> { "b" }, null, true, 30));
         }
 
         // --- その他フィールド ---
@@ -294,7 +294,7 @@ namespace ErogameScapeMetadata.Tests
         public void NullConfig_DoesNotEnableSslBypass()
         {
             // config 読み込み失敗時に既定で検証を無効化しないこと
-            var client = new ErogameScapeApiClient(null, null);
+            var client = new GalgameMetadataClient(null, null);
 
             Assert.NotNull(client);
             Assert.False(SslCertificateBypass.IsHostAllowed(""));

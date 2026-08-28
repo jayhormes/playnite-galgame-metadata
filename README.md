@@ -27,17 +27,17 @@ EGS, DLsite and DMM ids are resolved from VNDB release extlinks, so a title has 
 
 ## Install
 
-1. Grab `ErogameScapeMetadata.pext` from [Releases](https://github.com/jayhormes/playnite-galgame-metadata/releases)
+1. Grab `GalgameMetadata.pext` from [Releases](https://github.com/jayhormes/playnite-galgame-metadata/releases)
 2. Double-click it, or drag it onto the Playnite window
 3. Restart Playnite
 
 ## Use
 
-Right-click a game → **Edit** → **Download metadata**, then pick **Galgame (NocoDB/VNDB)** as the source. Search by the Japanese title. Automatic downloads work too, and match on an exact (normalised) title.
+Right-click a game → **Edit** → **Download metadata**, then pick **Galgame Metadata** as the source. Search by the Japanese title. Automatic downloads work too, and match on an exact (normalised) title.
 
 ## Configuration
 
-There is no settings UI. Edit `%AppData%\Playnite\ExtensionsData\b8e3f2a1-5c4d-4e6f-9a1b-2d3e4f5a6b7c\config.json` and restart Playnite.
+There is no settings UI. Edit `%AppData%\Playnite\ExtensionsData\e6ab0c61-8c40-4e4b-842b-08cd132c09e4\config.json` and restart Playnite.
 
 ```json
 {
@@ -87,8 +87,8 @@ Records are matched in this order: `vndb URL` exact, then `EGS URL` ending in `g
 Requires the .NET Framework 4.6.2 targeting pack, so Windows.
 
 ```
-dotnet build ErogameScapeMetadata.csproj -c Release
-dotnet test ErogameScapeMetadata.Tests/ErogameScapeMetadata.Tests.csproj -c Release
+dotnet build GalgameMetadata.csproj -c Release
+dotnet test GalgameMetadata.Tests/GalgameMetadata.Tests.csproj -c Release
 ```
 
 CI builds and tests on every push and attaches the `.pext` to the run. Pushing a `v*` tag publishes a release.

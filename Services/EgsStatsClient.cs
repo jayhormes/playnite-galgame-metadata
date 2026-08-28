@@ -8,7 +8,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace ErogameScapeMetadata.Services
+namespace GalgameMetadata.Services
 {
     // EGS スコア取得。**EGS 本体には一切アクセスしない**：
     //   1. Wayback Machine 快照（無料・無制限、スコアは快照時点値）

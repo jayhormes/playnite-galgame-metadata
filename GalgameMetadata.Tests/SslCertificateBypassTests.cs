@@ -1,8 +1,8 @@
-using ErogameScapeMetadata.Services;
+using GalgameMetadata.Services;
 using System.Net.Security;
 using Xunit;
 
-namespace ErogameScapeMetadata.Tests
+namespace GalgameMetadata.Tests
 {
     // ServicePointManager のコールバックはプロセス共有のため、
     // 「登録 host のみバイパス、他 host は従来どおり検証」が守られていることを検証する。

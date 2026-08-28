@@ -6,7 +6,7 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace ErogameScapeMetadata.Services
+namespace GalgameMetadata.Services
 {
     // VNDB kana API クライアント。検索・詳細・release extlinks（EGS/DLsite/DMM id の解決）を担当。
     // 2.0.0 リファクタ：EGS SQL API の代替として検索層を VNDB に置き換えた。

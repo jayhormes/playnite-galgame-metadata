@@ -1,4 +1,4 @@
-namespace ErogameScapeMetadata.Models
+namespace GalgameMetadata.Models
 {
     // 設定は ExtensionsData/<plugin id>/config.json
     public class PluginConfig

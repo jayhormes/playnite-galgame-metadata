@@ -1,5 +1,5 @@
-using ErogameScapeMetadata.Models;
-using ErogameScapeMetadata.Services;
+using GalgameMetadata.Models;
+using GalgameMetadata.Services;
 using Playnite.SDK;
 using Playnite.SDK.Models;
 using Playnite.SDK.Plugins;
@@ -13,16 +13,16 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace ErogameScapeMetadata
+namespace GalgameMetadata
 {
-    public class ErogameScapeMetadataProvider : OnDemandMetadataProvider
+    public class GalgameMetadataProvider : OnDemandMetadataProvider
     {
         private readonly MetadataRequestOptions _requestOptions;
-        private readonly ErogameScapeApiClient _apiClient;
+        private readonly GalgameMetadataClient _apiClient;
         private static readonly ILogger _logger = LogManager.GetLogger();
 
         private bool _searchCompleted;
-        private ErogameScapeGameInfo _matchedGame;
+        private GalgameInfo _matchedGame;
 
         public override List<MetadataField> AvailableFields { get; } = new List<MetadataField>
         {
@@ -42,8 +42,8 @@ namespace ErogameScapeMetadata
             MetadataField.Region,
         };
 
-        public ErogameScapeMetadataProvider(
-            MetadataRequestOptions options, ErogameScapeApiClient apiClient)
+        public GalgameMetadataProvider(
+            MetadataRequestOptions options, GalgameMetadataClient apiClient)
         {
             _requestOptions = options;
             _apiClient = apiClient;
@@ -89,8 +89,8 @@ namespace ErogameScapeMetadata
                 if (results == null || results.Count == 0)
                 {
                     // ゲーム名に版数タグが含まれていた場合、接尾辞を除去して再検索
-                    var strippedQuery = ErogameScapeApiClient.NormalizeAndStripSuffix(gameName);
-                    if (!string.IsNullOrEmpty(strippedQuery) && strippedQuery != ErogameScapeApiClient.NormalizeForComparison(gameName))
+                    var strippedQuery = GalgameMetadataClient.NormalizeAndStripSuffix(gameName);
+                    if (!string.IsNullOrEmpty(strippedQuery) && strippedQuery != GalgameMetadataClient.NormalizeForComparison(gameName))
                     {
                         results = Task.Run(() => _apiClient.SearchGamesAsync(strippedQuery, ct))
                             .GetAwaiter().GetResult();
@@ -100,22 +100,22 @@ namespace ErogameScapeMetadata
                 if (results == null || results.Count == 0)
                     return;
 
-                var normalized = ErogameScapeApiClient.NormalizeForComparison(gameName);
-                var strippedNormalized = ErogameScapeApiClient.NormalizeAndStripSuffix(gameName);
+                var normalized = GalgameMetadataClient.NormalizeForComparison(gameName);
+                var strippedNormalized = GalgameMetadataClient.NormalizeAndStripSuffix(gameName);
 
                 // 1. 完全一致（原題または英題）
                 var match = results.FirstOrDefault(r =>
-                    ErogameScapeApiClient.NormalizeForComparison(r.GameName) == normalized
+                    GalgameMetadataClient.NormalizeForComparison(r.GameName) == normalized
                     || (!string.IsNullOrEmpty(r.AltName)
-                        && ErogameScapeApiClient.NormalizeForComparison(r.AltName) == normalized));
+                        && GalgameMetadataClient.NormalizeForComparison(r.AltName) == normalized));
 
                 // 2. 版数・タグ除去後の一致
                 if (match == null && !string.IsNullOrEmpty(strippedNormalized))
                 {
                     match = results.FirstOrDefault(r =>
-                        ErogameScapeApiClient.NormalizeAndStripSuffix(r.GameName) == strippedNormalized
+                        GalgameMetadataClient.NormalizeAndStripSuffix(r.GameName) == strippedNormalized
                         || (!string.IsNullOrEmpty(r.AltName)
-                            && ErogameScapeApiClient.NormalizeAndStripSuffix(r.AltName) == strippedNormalized));
+                            && GalgameMetadataClient.NormalizeAndStripSuffix(r.AltName) == strippedNormalized));
                 }
 
                 if (match != null)
@@ -132,7 +132,7 @@ namespace ErogameScapeMetadata
 
         private void SearchInteractive(CancellationToken ct)
         {
-            List<ErogameScapeGameInfo> searchResults = null;
+            List<GalgameInfo> searchResults = null;
             List<GenericItemOption> itemOptions = null;
 
             var selectedItem = API.Instance.Dialogs.ChooseItemWithSearch(
@@ -156,7 +156,7 @@ namespace ErogameScapeMetadata
                     }
                     catch (Exception ex)
                     {
-                        _logger.Error(ex, "ErogameScape検索中にエラーが発生");
+                        _logger.Error(ex, "検索中にエラーが発生");
                         return new List<GenericItemOption>();
                     }
 
@@ -183,7 +183,7 @@ namespace ErogameScapeMetadata
             }
         }
 
-        private GenericItemOption CreateItemOption(ErogameScapeGameInfo game)
+        private GenericItemOption CreateItemOption(GalgameInfo game)
         {
             var title = game.GameName;
             if (!string.IsNullOrEmpty(game.BrandName))

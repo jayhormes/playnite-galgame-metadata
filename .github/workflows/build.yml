@@ -16,30 +16,30 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build
-        run: dotnet build ErogameScapeMetadata.csproj -c Release
+        run: dotnet build GalgameMetadata.csproj -c Release
 
       - name: Test
-        run: dotnet test ErogameScapeMetadata.Tests/ErogameScapeMetadata.Tests.csproj -c Release
+        run: dotnet test GalgameMetadata.Tests/GalgameMetadata.Tests.csproj -c Release
 
       - name: Package pext
         shell: pwsh
         run: |
           $bin = "bin/Release"
           New-Item -ItemType Directory staging | Out-Null
-          Copy-Item "$bin/ErogameScapeMetadata.dll" staging/
+          Copy-Item "$bin/GalgameMetadata.dll" staging/
           Copy-Item "$bin/HtmlAgilityPack.dll" staging/
           Copy-Item "$bin/extension.yaml" staging/
           Copy-Item "$bin/icon.png" staging/
-          Compress-Archive -Path staging/* -DestinationPath ErogameScapeMetadata.zip
-          Move-Item ErogameScapeMetadata.zip ErogameScapeMetadata.pext
+          Compress-Archive -Path staging/* -DestinationPath GalgameMetadata.zip
+          Move-Item GalgameMetadata.zip GalgameMetadata.pext
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ErogameScapeMetadata-pext
-          path: ErogameScapeMetadata.pext
+          name: GalgameMetadata-pext
+          path: GalgameMetadata.pext
 
       - name: Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: ErogameScapeMetadata.pext
+          files: GalgameMetadata.pext

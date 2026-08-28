@@ -1,9 +1,9 @@
-AddonId: ErogameScapeMetadata_b8e3f2a1-5c4d-4e6f-9a1b-2d3e4f5a6b7c
+AddonId: GalgameMetadata_e6ab0c61-8c40-4e4b-842b-08cd132c09e4
 Packages:
   - Version: 2.0.0
     RequiredApiVersion: 6.11.0
     ReleaseDate: 2026-08-28
-    PackageUrl: https://github.com/jayhormes/playnite-galgame-metadata/releases/download/v2.0.0/ErogameScapeMetadata.pext
+    PackageUrl: https://github.com/jayhormes/playnite-galgame-metadata/releases/download/v2.0.0/GalgameMetadata.pext
     Changelog:
       - Never contacts ErogameScape servers directly (the site blocks IPs that are not allow-listed)
       - Search now uses VNDB; EGS, DLsite and DMM ids come from VNDB release extlinks
@@ -12,22 +12,3 @@ Packages:
       - Community score falls back to the VNDB rating when no EGS data is available
       - Tags come from NocoDB when configured, otherwise VNDB content tags
       - Series and Features are no longer filled in; that data only existed in the EGS SQL API
-  - Version: 1.0.2
-    RequiredApiVersion: 6.11.0
-    ReleaseDate: 2026-07-21
-    PackageUrl: https://github.com/minuspiral/playnite-with-erogamescape/releases/download/v1.0.2/ErogameScapeMetadata.pext
-    Changelog:
-      - Fixed metadata download failing entirely when a fallback source (e.g. Getchu) times out
-      - Fixed Getchu description lookup by encoding search keywords as EUC-JP
-  - Version: 1.0.1
-    RequiredApiVersion: 6.11.0
-    ReleaseDate: 2026-05-11
-    PackageUrl: https://github.com/minuspiral/playnite-with-erogamescape/releases/download/v1.0.1/ErogameScapeMetadata.pext
-    Changelog:
-      - Fixed Japanese keyword search failing with pg_escape_string() error after ErogameScape site renewal
-  - Version: 1.0.0
-    RequiredApiVersion: 6.11.0
-    ReleaseDate: 2026-02-26
-    PackageUrl: https://github.com/minuspiral/playnite-with-erogamescape/releases/download/v1.0.0/ErogameScapeMetadata.pext
-    Changelog:
-      - Initial release

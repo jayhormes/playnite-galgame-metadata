@@ -4,7 +4,7 @@ using System.Net;
 using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
 
-namespace ErogameScapeMetadata.Services
+namespace GalgameMetadata.Services
 {
     /// <summary>
     /// 自己署名証明書の自建 NocoDB（例: https://192.168.1.106:5555）向けの検証バイパス。

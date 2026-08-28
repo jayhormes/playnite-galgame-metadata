@@ -7,7 +7,7 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace ErogameScapeMetadata.Services
+namespace GalgameMetadata.Services
 {
     public class NocoDbClient
     {
