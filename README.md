@@ -37,34 +37,20 @@ Right-click a game → **Edit** → **Download metadata**, then pick **Galgame M
 
 ## Configuration
 
-There is no settings UI. Edit `%AppData%\Playnite\ExtensionsData\e6ab0c61-8c40-4e4b-842b-08cd132c09e4\config.json` and restart Playnite.
+Open **Add-ons → Extensions → Galgame Metadata** and fill in the settings there. Everything is optional; with nothing set the plugin uses VNDB plus Wayback snapshots.
 
-```json
-{
-  "TavilyApiKey": "",
-  "PreferTavily": false,
-  "NocoDbBaseUrl": "",
-  "NocoDbApiToken": "",
-  "NocoDbGamesTableId": "",
-  "NocoDbGenreLinkId": "",
-  "NocoDbAttrLinkId": "",
-  "PreferNocoDbTags": true,
-  "NocoDbMaxTags": 30,
-  "NocoDbIgnoreSslErrors": false,
-  "FallbackNocoDbScores": true
-}
-```
+Settings are stored in `%AppData%\Playnite\ExtensionsData\e6ab0c61-8c40-4e4b-842b-08cd132c09e4\config.json`, so an existing hand-written file is picked up as-is.
 
-| Key | Default | What it does |
+| Setting | Default | What it does |
 |---|---|---|
-| `TavilyApiKey` | empty | Empty means Wayback only. Set it to also fetch live EGS scores when no snapshot exists. |
-| `PreferTavily` | `false` | `true` tries Tavily first and falls back to Wayback. |
-| `NocoDbBaseUrl`, `NocoDbApiToken`, `NocoDbGamesTableId` | empty | All three are required to enable the NocoDB lookup. |
-| `NocoDbGenreLinkId`, `NocoDbAttrLinkId` | empty | Column ids (they start with `c`) of the Links fields holding your tags. |
-| `PreferNocoDbTags` | `true` | `true` uses NocoDB tags only; `false` appends VNDB tags after them. |
-| `NocoDbMaxTags` | `30` | Caps how many tags get written. `0` means no cap. |
-| `NocoDbIgnoreSslErrors` | `false` | For a NocoDB behind a self-signed certificate. Only that one host skips validation; everything else in Playnite still verifies normally. |
-| `FallbackNocoDbScores` | `true` | `true` uses the scores already stored in NocoDB; `false` ignores them and always goes to Wayback/Tavily. |
+| Tavily API key | empty | Empty means Wayback only. Set it to also fetch live EGS scores when no snapshot exists. |
+| Prefer Tavily over Wayback | off | Tries live values first. Needs an API key. |
+| NocoDB base URL, API token, games table ID | empty | All three are required to enable the NocoDB lookup. |
+| Genre / attribute tags column ID | empty | Column ids (they start with `c`) of the Links fields holding your tags. |
+| Use NocoDB tags only | on | Off appends VNDB tags after the NocoDB ones. |
+| Max tags | `30` | Caps how many tags get written. `0` means no cap. |
+| Use scores stored in NocoDB | on | Off ignores them and always goes to Wayback/Tavily. |
+| Ignore certificate errors for this host | off | For a NocoDB behind a self-signed certificate. Only that one host skips validation; everything else in Playnite still verifies normally. |
 
 To find the Links column ids, call `GET {NocoDbBaseUrl}/api/v2/meta/tables/{tableId}` and look for the columns with `"uidt": "Links"`.
 

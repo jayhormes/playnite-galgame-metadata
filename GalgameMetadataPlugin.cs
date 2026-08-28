@@ -1,11 +1,10 @@
 using GalgameMetadata.Models;
 using GalgameMetadata.Services;
+using GalgameMetadata.Views;
 using Playnite.SDK;
-using Playnite.SDK.Data;
 using Playnite.SDK.Plugins;
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Windows.Controls;
 
 namespace GalgameMetadata
@@ -13,7 +12,8 @@ namespace GalgameMetadata
     public class GalgameMetadataPlugin : MetadataPlugin
     {
         private static readonly ILogger _logger = LogManager.GetLogger();
-        private readonly GalgameMetadataClient _apiClient;
+
+        private readonly PluginConfigViewModel _settings;
 
         public override Guid Id { get; } = Guid.Parse("e6ab0c61-8c40-4e4b-842b-08cd132c09e4");
 
@@ -40,48 +40,33 @@ namespace GalgameMetadata
 
         public GalgameMetadataPlugin(IPlayniteAPI api) : base(api)
         {
-            _apiClient = new GalgameMetadataClient(_logger, LoadConfig());
+            // LoadPluginSettings/SavePluginSettings は ExtensionsData/<id>/config.json を読み書きするので、
+            // 以前に手で書いた config.json もそのまま引き継がれる
+            _settings = new PluginConfigViewModel(
+                () => LoadPluginSettings<PluginConfig>(),
+                config => SavePluginSettings(config));
+
             Properties = new MetadataPluginProperties
             {
-                HasSettings = false
+                HasSettings = true
             };
-        }
-
-        // 設定は ExtensionsData/<plugin id>/config.json（UI なし、手動編集して Playnite 再起動）
-        private PluginConfig LoadConfig()
-        {
-            var path = Path.Combine(GetPluginUserDataPath(), "config.json");
-            try
-            {
-                if (File.Exists(path))
-                {
-                    return Serialization.FromJson<PluginConfig>(File.ReadAllText(path)) ?? new PluginConfig();
-                }
-                var config = new PluginConfig();
-                Directory.CreateDirectory(GetPluginUserDataPath());
-                File.WriteAllText(path, Serialization.ToJson(config, true));
-                return config;
-            }
-            catch (Exception ex)
-            {
-                _logger.Warn($"config.json 読み込み失敗、既定値を使用: {ex.Message}");
-                return new PluginConfig();
-            }
         }
 
         public override OnDemandMetadataProvider GetMetadataProvider(MetadataRequestOptions options)
         {
-            return new GalgameMetadataProvider(options, _apiClient);
+            // 取得のたびに現在の設定でクライアントを作る（設定変更後の再起動が不要）
+            return new GalgameMetadataProvider(
+                options, new GalgameMetadataClient(_logger, _settings.Settings));
         }
 
         public override ISettings GetSettings(bool firstRunSettings)
         {
-            return null;
+            return _settings;
         }
 
         public override UserControl GetSettingsView(bool firstRunSettings)
         {
-            return null;
+            return new SettingsView { DataContext = _settings };
         }
     }
 }
